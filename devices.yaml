@@ -1,0 +1,38 @@
+# Hex values (product_hex, address, size) must be quoted strings e.g. "0x06002011"
+# Unquoted hex is not supported in YAML 1.2 and will be parsed as strings unpredictably.
+
+devices:
+  - product_hex: "0x06002011"
+    product_id: FFI0600-2011
+    status: ACTIVE
+    inputs_count: 6
+    outputs_count: 0
+    board_fqbn: "esp8266:esp8266:generic"
+    board_options:
+      flash_size: "4M2M"
+      flash_mode: "dio"
+      flash_freq: "40"
+      cpu_freq: "80"
+    bootloader_addr: "0x000000"
+    partition_scheme:
+      - label: eboot
+        address: "0x000000"
+        size: "0x1000"
+      - label: app0
+        address: "0x001000"
+        size: "0x100000"
+      - label: app1
+        address: "0x101000"
+        size: "0x100000"
+      - label: littlefs
+        address: "0x200000"
+        size: "0x1FB000"
+      - label: rf_cal
+        address: "0x3FB000"
+        size: "0x1000"
+      - label: phy_init
+        address: "0x3FC000"
+        size: "0x1000"
+      - label: sdk_config
+        address: "0x3FE000"
+        size: "0x2000"
