@@ -31,12 +31,9 @@ jobs:
                     product_hex: .product_hex,
                     product_id: .product_id,
                     fqbn: (
-                      .board_fqbn + ":" + ([
-                        "FlashSize=" + .board_options.flash_size,
-                        "FlashMode=" + .board_options.flash_mode,
-                        "FlashFreq=" + .board_options.flash_freq,
-                        "CpuFrequency=" + .board_options.cpu_freq
-                      ] | join(","))
+                      .board_fqbn + ":" + (
+                        .board_options | to_entries | map(.key + "=" + .value) | join(",")
+                      )
                     ),
                     partition_size_app: (
                       .partition_scheme[]

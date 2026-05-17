@@ -30,12 +30,9 @@ jobs:
           FIRST_DEVICE=$(yq -o=json '.devices[] | select(.status == "ACTIVE")' devices.yaml | jq -rs '.[0]')
           echo "PRODUCT_HEX=$(echo "$FIRST_DEVICE" | jq -r '.product_hex')" >> $GITHUB_ENV
           FQBN=$(echo "$FIRST_DEVICE" | jq -r '
-            .board_fqbn + ":" + ([
-              "FlashSize=" + .board_options.flash_size,
-              "FlashMode=" + .board_options.flash_mode,
-              "FlashFreq=" + .board_options.flash_freq,
-              "CpuFrequency=" + .board_options.cpu_freq
-            ] | join(","))
+            .board_fqbn + ":" + (
+              .board_options | to_entries | map(.key + "=" + .value) | join(",")
+            )
           ')
           echo "FQBN=$FQBN" >> $GITHUB_ENV
 
