@@ -7,6 +7,7 @@
 #include <ESP8266HTTPClient.h>
 #include <ESP8266httpUpdate.h>
 #include <WiFiClientSecure.h>
+#define MQTT_MAX_PACKET_SIZE 4096
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
@@ -168,7 +169,6 @@ void setup() {
 
     mqttClient.setServer(cfg.mqttHost.c_str(), cfg.mqttPort);
     mqttClient.setCallback(mqttCallback);
-    mqttClient.setBufferSize(4096);
 }
 
 // ─── Main loop ────────────────────────────────────────────────────────────────
@@ -241,7 +241,7 @@ void runProvisioningMode() {
                 snprintf(&password[i * 2], 3, "%X%X", upper, lower);
             }
 
-            WiFi.begin("FireFly-Provisioning", password);
+            WiFi.begin("FireFly-Provisioning", (const char*)password);
             unsigned long start = millis();
             while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
                 rotateLeds();
@@ -640,8 +640,10 @@ void checkOta() {
     url += VERSION;
 
     WiFiClientSecure checkClient;
+    BearSSL::X509List checkCA;
     if (certPem.length() > 0) {
-        checkClient.setCACert(certPem.c_str());
+        checkCA.append(certPem.c_str());
+        checkClient.setTrustAnchors(&checkCA);
     } else {
         checkClient.setInsecure();
     }
@@ -676,8 +678,10 @@ void checkOta() {
     ESPhttpUpdate.setLedPin(LED_BUILTIN, LOW);
 
     WiFiClientSecure updateClient;
+    BearSSL::X509List updateCA;
     if (certPem.length() > 0) {
-        updateClient.setCACert(certPem.c_str());
+        updateCA.append(certPem.c_str());
+        updateClient.setTrustAnchors(&updateCA);
     } else {
         updateClient.setInsecure();
     }
