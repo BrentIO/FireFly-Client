@@ -1,0 +1,100 @@
+# Build from the REPO ROOT (not from .act/) so that libraries.yaml is in the build context:
+#
+# Apple Silicon:
+#   docker build --no-cache --platform=linux/arm64 -t act-arduino-ubuntu-24-04:latest -f .act/dockerfile .
+#
+# Intel:
+#   docker build --no-cache --platform=linux/amd64 -t act-arduino-ubuntu-24-04:latest -f .act/dockerfile .
+
+FROM ghcr.io/catthehacker/ubuntu:act-24.04
+LABEL act="act-arduino-ubuntu-24-04"
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV HOME=/github/home
+
+RUN mkdir -p /github/home
+
+# ---------------------------------------------------------
+# Base system packages
+# ---------------------------------------------------------
+RUN apt-get update && apt-get install -y \
+    bash \
+    curl \
+    unzip \
+    zip \
+    git \
+    jq \
+    python3 \
+    python3-pip \
+    python3.12-venv \
+    python3.12-dev \
+    ca-certificates \
+    gnupg \
+    lsb-release \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    python3-serial \
+    gzip \
+    tar \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install yq (mikefarah) for YAML parsing
+ARG TARGETARCH
+RUN if [ "$TARGETARCH" = "arm64" ]; then YQ_ARCH="arm64"; else YQ_ARCH="amd64"; fi && \
+    curl -fsSL "https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_${YQ_ARCH}" \
+      -o /usr/local/bin/yq && chmod +x /usr/local/bin/yq
+
+# ---------------------------------------------------------
+# Install GitHub CLI (gh)
+# ---------------------------------------------------------
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    | tee /usr/share/keyrings/githubcli-archive-keyring.gpg >/dev/null \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+       | tee /etc/apt/sources.list.d/github-cli.list >/dev/null \
+    && apt-get update \
+    && apt-get install -y gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------
+# Install Arduino CLI
+# ---------------------------------------------------------
+ARG TARGETARCH
+ENV ARDUINO_CLI_VERSION=1.4.1
+
+RUN echo "Building for architecture: $TARGETARCH" && \
+   if [ "$TARGETARCH" = "arm64" ]; then \
+       ARCHIVE="arduino-cli_${ARDUINO_CLI_VERSION}_Linux_ARM64.tar.gz"; \
+   else \
+       ARCHIVE="arduino-cli_${ARDUINO_CLI_VERSION}_Linux_64bit.tar.gz"; \
+   fi && \
+   curl -fsSL "https://downloads.arduino.cc/arduino-cli/${ARCHIVE}" -o arduino-cli.tar.gz && \
+   tar -xzf arduino-cli.tar.gz && \
+   mv arduino-cli /usr/local/bin/arduino-cli && \
+   rm -rf arduino-cli.tar.gz
+
+# ---------------------------------------------------------
+# Configure Arduino CLI + ESP8266 core for BOTH ACT HOME paths
+# ---------------------------------------------------------
+COPY libraries.yaml /tmp/libraries.yaml
+RUN ESP8266_CORE=$(yq -r '.cores[] | select(.name == "esp8266:esp8266") | .version' /tmp/libraries.yaml) && \
+    for H in /github/home /home/runner; do \
+      mkdir -p $H/.arduino15 && \
+      HOME=$H arduino-cli config init && \
+      HOME=$H arduino-cli config set directories.data $H/.arduino15 && \
+      HOME=$H arduino-cli config set board_manager.additional_urls \
+        https://arduino.esp8266.com/stable/package_esp8266com_index.json && \
+      HOME=$H arduino-cli core update-index && \
+      HOME=$H arduino-cli core install esp8266:esp8266@${ESP8266_CORE}; \
+    done
+
+# ---------------------------------------------------------
+# Install required Arduino libraries INTO BOTH HOME PATHS
+# ---------------------------------------------------------
+RUN for H in /github/home /home/runner; do \
+      HOME=$H arduino-cli config set library.enable_unsafe_install true && \
+      yq -r '.libraries[] | .url + ".git#" + .version' /tmp/libraries.yaml | \
+        xargs -I{} sh -c "HOME=$H arduino-cli lib install --git-url {}"; \
+    done
