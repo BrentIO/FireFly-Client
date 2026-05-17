@@ -1,0 +1,51 @@
+name: 📋 Generate Firmware and Device Matrix
+
+on:
+  workflow_call:
+    outputs:
+      matrix:
+        description: "Generated build matrix"
+        value: ${{ jobs.generate.outputs.matrix }}
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  generate:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.build.outputs.matrix }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - id: build
+        run: |
+          MATRIX=$(yq -o=json devices.yaml | jq -c '
+            {
+              include: [
+                .devices[]
+                | select(.status == "ACTIVE")
+                | {
+                    application: "Client",
+                    product_hex: .product_hex,
+                    product_id: .product_id,
+                    fqbn: (
+                      .board_fqbn + ":" + ([
+                        "FlashSize=" + .board_options.flash_size,
+                        "FlashMode=" + .board_options.flash_mode,
+                        "FlashFreq=" + .board_options.flash_freq,
+                        "CpuFrequency=" + .board_options.cpu_freq
+                      ] | join(","))
+                    ),
+                    partition_size_app: (
+                      .partition_scheme[]
+                      | select(.label == "app0")
+                      | .size
+                    )
+                  }
+              ]
+            }
+          ')
+
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT

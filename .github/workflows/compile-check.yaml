@@ -1,0 +1,69 @@
+name: 🔧 Compile Check
+
+on:
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: compile-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  compile:
+    name: Compile Firmware
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Read build variables
+        run: |
+          echo "VERSION_ESP_Core=$(yq -r '.cores[] | select(.name == "esp8266:esp8266") | .version' libraries.yaml)" >> $GITHUB_ENV
+          FIRST_DEVICE=$(yq -o=json '.devices[] | select(.status == "ACTIVE")' devices.yaml | jq -rs '.[0]')
+          echo "PRODUCT_HEX=$(echo "$FIRST_DEVICE" | jq -r '.product_hex')" >> $GITHUB_ENV
+          FQBN=$(echo "$FIRST_DEVICE" | jq -r '
+            .board_fqbn + ":" + ([
+              "FlashSize=" + .board_options.flash_size,
+              "FlashMode=" + .board_options.flash_mode,
+              "FlashFreq=" + .board_options.flash_freq,
+              "CpuFrequency=" + .board_options.cpu_freq
+            ] | join(","))
+          ')
+          echo "FQBN=$FQBN" >> $GITHUB_ENV
+
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+        with:
+          version: 1.4.1
+
+      - name: Configure Arduino CLI
+        run: |
+          arduino-cli config init
+          arduino-cli config set board_manager.additional_urls https://arduino.esp8266.com/stable/package_esp8266com_index.json
+          arduino-cli core update-index
+
+      - name: Install ESP8266 core
+        run: arduino-cli core install esp8266:esp8266@${{ env.VERSION_ESP_Core }}
+
+      - name: Enable unsafe library install
+        run: arduino-cli config set library.enable_unsafe_install true
+
+      - name: Install libraries
+        run: |
+          yq -r '.libraries[] | .url + ".git#" + .version' libraries.yaml | \
+            xargs -I{} arduino-cli lib install --git-url {}
+
+      - name: Compile Client
+        run: |
+          arduino-cli compile \
+            -b "${{ env.FQBN }}" ./Client \
+            --warnings more --clean \
+            --build-property "build.extra_flags=-DPRODUCT_HEX=${{ env.PRODUCT_HEX }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -I${{ github.workspace }}"
