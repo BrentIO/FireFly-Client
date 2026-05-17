@@ -1,0 +1,357 @@
+name: 🛠️ Build Firmware
+
+on:
+  push:
+    tags:
+      - '[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9]'
+  workflow_dispatch:
+    inputs:
+      target_env:
+        type: choice
+        description: "Select destination environment"
+        options:
+          - production
+          - dev
+
+env:
+  ARTIFACT_ROOT: /home/runner/artifacts
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+
+  load-matrix:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    uses: ./.github/workflows/generate-matrix.yaml
+
+  ConfigureAndBuild:
+    needs: load-matrix
+    environment: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && 'production' || inputs.target_env }}
+
+    name: Build ${{ matrix.application }} (${{ matrix.product_id }})
+    runs-on: ubuntu-24.04
+
+    permissions:
+      id-token: write
+      contents: read
+
+    strategy:
+      matrix: ${{ fromJson(needs.load-matrix.outputs.matrix) }}
+
+    steps:
+      - name: Set and Adjust Build Variables
+        run: |
+          COMMIT_HASH=${GITHUB_SHA::7}
+          echo "COMMIT_HASH=$COMMIT_HASH" >> $GITHUB_ENV
+
+          BRANCH=${GITHUB_REF_NAME//\//-}
+          echo "BRANCH=$BRANCH" >> $GITHUB_ENV
+
+      - name: Echo Tag or Branch Name and Commit Hash
+        run: |
+          echo "BRANCH: ${{ env.BRANCH }}"
+          echo "COMMIT_HASH: ${{ env.COMMIT_HASH }}"
+          echo "ARTIFACT_ROOT: ${{ env.ARTIFACT_ROOT }}"
+
+      - name: Set VERSION based on tag or branch
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            echo "VERSION=$TAG" >> $GITHUB_ENV
+            echo "Release tag: $TAG"
+
+            if [[ ! "$TAG" =~ ^[0-9]{4}\.(0[1-9]|1[0-2])\.[0-9]{2}$ ]]; then
+              echo "❌ Invalid tag format. Expected YYYY.MM.bb"
+              exit 1
+            fi
+
+          else
+            echo "VERSION=DEBUG" >> $GITHUB_ENV
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Arduino CLI
+        if: ${{ !env.ACT }}
+        uses: arduino/setup-arduino-cli@v2
+        with:
+          version: 1.4.1
+
+      - name: Read ESP8266 core version
+        run: echo "VERSION_ESP_Core=$(yq -r '.cores[] | select(.name == "esp8266:esp8266") | .version' ${{ github.workspace }}/libraries.yaml)" >> $GITHUB_ENV
+
+      - name: Initialize the Arduino CLI Installation
+        if: ${{ !env.ACT }}
+        run: arduino-cli config init
+
+      - name: Add the ESP8266 Board Manager Packages to Arduino CLI
+        if: ${{ !env.ACT }}
+        run: arduino-cli config set board_manager.additional_urls https://arduino.esp8266.com/stable/package_esp8266com_index.json
+
+      - name: Update the Core Index
+        if: ${{ !env.ACT }}
+        run: arduino-cli core update-index
+
+      - name: Cache ESP8266 core
+        id: cache-esp8266-core
+        if: ${{ !env.ACT }}
+        uses: actions/cache@v5
+        with:
+          path: ~/.arduino15/packages/esp8266
+          key: esp8266-core-${{ env.VERSION_ESP_Core }}
+
+      - name: Install ESP8266 Core
+        if: ${{ !env.ACT && steps.cache-esp8266-core.outputs.cache-hit != 'true' }}
+        run: arduino-cli core install esp8266:esp8266@${{ env.VERSION_ESP_Core }}
+
+      - name: Enable Unsafe Installation Flag to Enable Git Installs
+        run: arduino-cli config set library.enable_unsafe_install true
+
+      - name: Cache Arduino libraries
+        id: cache-arduino-libs
+        if: ${{ !env.ACT }}
+        uses: actions/cache@v5
+        with:
+          path: ~/Arduino/libraries
+          key: arduino-libs-${{ hashFiles('libraries.yaml') }}
+
+      - name: Install Required Libraries at Specified Revisions
+        if: ${{ !env.ACT && steps.cache-arduino-libs.outputs.cache-hit != 'true' }}
+        run: |
+          yq -r '.libraries[] | .url + ".git#" + .version' ${{ github.workspace }}/libraries.yaml | \
+            xargs -I{} arduino-cli lib install --git-url {}
+
+      - name: Create Output Directory
+        run: mkdir -p "${{ env.ARTIFACT_ROOT }}/${{ matrix.product_id }}/${{ matrix.application }}/${{ env.BRANCH }}-${{ env.COMMIT_HASH }}"
+
+      - name: Compile ${{ matrix.application }} (${{ matrix.product_id }})
+        run: |
+          set -e
+
+          BRANCH="${{ env.BRANCH }}"
+          COMMIT_HASH="${{ env.COMMIT_HASH }}"
+          APPLICATION="${{ matrix.application }}"
+          OUTDIR="${{ env.ARTIFACT_ROOT }}/${{ matrix.product_id }}/${APPLICATION}/${BRANCH}-${COMMIT_HASH}"
+          mkdir -p "$OUTDIR"
+
+          if [ "$VERSION" = "DEBUG" ]; then
+            echo "Building DEBUG firmware ($BRANCH)"
+            arduino-cli compile \
+              -b "${{ matrix.fqbn }}" ./${APPLICATION} \
+              --warnings more --clean \
+              --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -I${{ github.workspace }}" \
+              --output-dir "$OUTDIR"
+          else
+            echo "Building RELEASE firmware ($VERSION)"
+            arduino-cli compile \
+              -b "${{ matrix.fqbn }}" ./${APPLICATION} \
+              --warnings more --clean \
+              --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=0 -DVERSION=\"${VERSION}\" -DCOMMIT_HASH=\"${COMMIT_HASH}\" -I${{ github.workspace }}" \
+              --output-dir "$OUTDIR"
+          fi
+
+      - name: Generate manifest JSON
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ROOT="${{ env.ARTIFACT_ROOT }}"
+          NAME="${{ matrix.product_id }}"
+          APPLICATION="${{ matrix.application }}"
+          BRANCH="${{ env.BRANCH }}"
+          VERSION="${{ env.VERSION }}"
+          COMMIT_HASH="${{ env.COMMIT_HASH }}"
+          JSON_FILE="${ROOT}/${NAME}/${APPLICATION}/${BRANCH}-${COMMIT_HASH}/manifest.json"
+
+          CREATED_ISO=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          RELEASE_URL=""
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            RELEASE_URL=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${VERSION}" \
+              --jq '.html_url // empty' 2>/dev/null || true)
+          fi
+
+          FILES_JSON=$(jq -nc '[]')
+
+          while IFS= read -r f; do
+            NAME=$(basename "$f")
+            SHA256=$(sha256sum "$f" | awk '{print $1}')
+
+            FILES_JSON=$(echo "$FILES_JSON" \
+              | jq -c --arg name "$NAME" --arg sha256 "$SHA256" \
+                '. += [{name: $name, sha256: $sha256}]')
+          done < <(find "$ROOT" -type f)
+
+          JSON=$(jq -nc \
+            --arg class "client" \
+            --arg product_id "${{ matrix.product_id }}" \
+            --arg product_hex "${{ matrix.product_hex }}" \
+            --arg firmware_type "FireFly Client" \
+            --arg application "${{ matrix.application }}" \
+            --arg branch "${{ env.BRANCH }}" \
+            --arg version "${{ env.VERSION }}" \
+            --arg commit "${{ env.COMMIT_HASH }}" \
+            --arg created "$CREATED_ISO" \
+            --arg bootloader_addr "${{ matrix.bootloader_addr }}" \
+            --argjson files "$FILES_JSON" \
+            '{
+              class: $class,
+              product_id: $product_id,
+              product_hex: $product_hex,
+              firmware_type: $firmware_type,
+              application: $application,
+              branch: $branch,
+              version: $version,
+              commit: $commit,
+              created: $created,
+              bootloader_addr: $bootloader_addr,
+              files: $files
+            }')
+
+          if [ -n "$RELEASE_URL" ]; then
+            JSON=$(echo "$JSON" | jq --arg url "$RELEASE_URL" '. + {release_url: $url}')
+          fi
+
+          echo "$JSON" > "$JSON_FILE"
+
+      - uses: actions/upload-artifact@v7
+        name: Upload Artifacts
+        with:
+          if-no-files-found: error
+          name: ${{ matrix.product_id }}-${{ matrix.application }}-${{ env.BRANCH }}-${{ env.COMMIT_HASH }}
+          path: ${{ env.ARTIFACT_ROOT }}/${{ matrix.product_id }}/${{ matrix.application }}/${{ env.BRANCH }}-${{ env.COMMIT_HASH }}/*
+
+      - name: Configure AWS Credentials
+        if: ${{ !env.ACT }}
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload ZIP to S3
+        if: ${{ !env.ACT }}
+        run: |
+          OUTDIR="${{ env.ARTIFACT_ROOT }}/${{ matrix.product_id }}/${{ matrix.application }}/${{ env.BRANCH }}-${{ env.COMMIT_HASH }}"
+          DEST_KEY="incoming/client-${{ matrix.product_hex }}-${{ env.BRANCH }}-${{ env.COMMIT_HASH }}.zip"
+
+          cd "$OUTDIR"
+          zip -r /tmp/firmware-upload.zip .
+
+          aws s3 cp /tmp/firmware-upload.zip \
+            "s3://${{ secrets.S3_FIRMWARE_BUCKET_NAME }}/${DEST_KEY}"
+
+  sync-library-docs:
+    needs: ConfigureAndBuild
+    if: ${{ github.event.inputs.target_env == 'production' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) }}
+    runs-on: ubuntu-24.04
+    environment: production
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout FireFly-Client
+        uses: actions/checkout@v6
+
+      - name: Set Build Variables
+        run: |
+          echo "BRANCH=$GITHUB_REF_NAME" >> $GITHUB_ENV
+
+      - name: Generate core table
+        id: core_table
+        run: |
+          TABLE=$(yq -r '
+            .cores
+            | sort_by(.name)
+            | .[]
+            | "| [" + .name + "](" + .url + ") | " + .version + " |"
+          ' libraries.yaml)
+          echo "table<<EOF" >> $GITHUB_OUTPUT
+          echo "$TABLE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Generate library table
+        id: table
+        run: |
+          TABLE=$(yq -r '
+            .libraries
+            | sort_by(.name)
+            | .[]
+            | "| [" + .name + "](" + .url + ") | " + .version + " |"
+          ' libraries.yaml)
+          echo "table<<EOF" >> $GITHUB_OUTPUT
+          echo "$TABLE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Checkout FireFly-Docs
+        uses: actions/checkout@v6
+        with:
+          repository: BrentIO/FireFly-Docs
+          token: ${{ secrets.FIREFLY_DOCS_TOKEN }}
+          path: FireFly-Docs
+
+      - name: Update core and library tables and open PR
+        env:
+          GH_TOKEN: ${{ secrets.FIREFLY_DOCS_TOKEN }}
+          CORE_TABLE: ${{ steps.core_table.outputs.table }}
+          LIBRARY_TABLE: ${{ steps.table.outputs.table }}
+        run: |
+          cd FireFly-Docs
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          SYNC_BRANCH="sync/client-library-list-${{ env.BRANCH }}"
+          git checkout -b "$SYNC_BRANCH"
+
+          python3 - <<'PYEOF'
+          import re, os
+          path = "client/development_environment/index.md"
+          content = open(path).read()
+
+          core_table = os.environ["CORE_TABLE"]
+          new_core_block = (
+              "<!-- CORE-TABLE-START -->\n"
+              "| Core | Version |\n"
+              "| ---- | ------- |\n"
+              + core_table + "\n"
+              "<!-- CORE-TABLE-END -->"
+          )
+          content = re.sub(
+              r"<!-- CORE-TABLE-START -->.*?<!-- CORE-TABLE-END -->",
+              new_core_block,
+              content,
+              flags=re.DOTALL
+          )
+
+          library_table = os.environ["LIBRARY_TABLE"]
+          new_library_block = (
+              "<!-- LIBRARY-TABLE-START -->\n"
+              "| Library | Version |\n"
+              "| ------- | ------- |\n"
+              + library_table + "\n"
+              "<!-- LIBRARY-TABLE-END -->"
+          )
+          content = re.sub(
+              r"<!-- LIBRARY-TABLE-START -->.*?<!-- LIBRARY-TABLE-END -->",
+              new_library_block,
+              content,
+              flags=re.DOTALL
+          )
+
+          open(path, "w").write(content)
+          PYEOF
+
+          git add client/development_environment/index.md
+          if git diff --cached --quiet; then
+            echo "Core and library tables unchanged, skipping PR"
+            exit 0
+          fi
+
+          git commit -m "Update core and library versions from FireFly-Client ${{ env.BRANCH }}"
+          git push origin "$SYNC_BRANCH"
+
+          gh pr create \
+            --repo BrentIO/FireFly-Docs \
+            --title "Update core and library versions from FireFly-Client ${{ env.BRANCH }}" \
+            --body "Automated core and library version sync triggered by production build of \`${{ env.BRANCH }}\`." \
+            --base main \
+            --head "$SYNC_BRANCH"
