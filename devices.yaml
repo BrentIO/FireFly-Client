@@ -9,10 +9,10 @@ devices:
     outputs_count: 0
     board_fqbn: "esp8266:esp8266:generic"
     board_options:
-      flash_size: "4M2M"
-      flash_mode: "dio"
-      flash_freq: "40"
-      cpu_freq: "80"
+      eesz: "4M2M"
+      FlashMode: "dio"
+      FlashFreq: "40"
+      xtal: "80"
     bootloader_addr: "0x000000"
     partition_scheme:
       - label: eboot
