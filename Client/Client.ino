@@ -10,7 +10,7 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
-#include "../common/hardware.h"
+#include "common/hardware.h"
 
 // ─── Firmware version ────────────────────────────────────────────────────────
 
