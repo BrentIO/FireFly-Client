@@ -1,0 +1,820 @@
+asyncapi: 3.1.0
+
+info:
+  title: FireFly Client
+  description: MQTT messages published and subscribed to by the FireFly Client firmware
+  version: "9999.99.99"
+
+servers:
+  mqtt:
+    host: "{host}:{port}"
+    protocol: mqtt
+    description: MQTT broker used by the client
+    variables:
+      host:
+        default: localhost
+        description: Hostname or IP address of the MQTT broker
+      port:
+        default: "1883"
+        description: TCP port of the MQTT broker
+    security:
+      - $ref: "#/components/securitySchemes/userPassword"
+
+
+##########################################################
+## Channels                                             ##
+##########################################################
+
+channels:
+
+  ##########################################################
+  ## Device availability                                  ##
+  ##########################################################
+
+  clientAvailability:
+    address: "FireFly/{uuid}/availability"
+    description: Device-level availability for the client. Published as the MQTT Last Will and Testament (LWT) so the broker posts "offline" automatically when the connection drops.
+    parameters:
+      uuid:
+        $ref: "#/components/parameters/clientUuid"
+    messages:
+      availability:
+        $ref: "#/components/messages/availability"
+
+  ##########################################################
+  ## Input state (subscribed from Controller)             ##
+  ##########################################################
+
+  inputChannelState:
+    address: "FireFly/inputs/{portId}/channels/{channelNumber}/state"
+    description: >
+      Input channel state published by the Controller when a button or switch changes state.
+      The client subscribes to this topic for each configured HID channel and adjusts the
+      corresponding LED in response.
+    parameters:
+      portId:
+        $ref: "#/components/parameters/portId"
+      channelNumber:
+        $ref: "#/components/parameters/channelNumber"
+    messages:
+      inputState:
+        $ref: "#/components/messages/inputState"
+
+  ##########################################################
+  ## LED brightness control                               ##
+  ##########################################################
+
+  clientLedBrightnessSet:
+    address: "FireFly/{uuid}/leds/brightness/set"
+    description: >
+      Command topic to set the brightness level of all configured LEDs on this client.
+      The client subscribes to this topic. The payload is a numeric brightness percentage (0–100).
+    parameters:
+      uuid:
+        $ref: "#/components/parameters/clientUuid"
+    messages:
+      ledBrightnessSet:
+        $ref: "#/components/messages/ledBrightnessSet"
+
+  ##########################################################
+  ## Certificate rotation (broadcast)                     ##
+  ##########################################################
+
+  clientCertBroadcast:
+    address: "FireFly/clients/cert/state"
+    description: >
+      Broadcast topic published by the Controller (retained) when the CA certificate designated
+      for client use is created or rotated. All clients subscribe to this topic. Because the
+      message is retained, devices that are offline at rotation time receive the updated
+      certificate automatically when they reconnect.
+      The payload includes the certificate PEM and its SHA-256 fingerprint so clients can detect
+      rotation without re-parsing the full certificate.
+    messages:
+      certBroadcast:
+        $ref: "#/components/messages/certBroadcast"
+
+  ##########################################################
+  ## Certificate state                                    ##
+  ##########################################################
+
+  clientCertState:
+    address: "FireFly/{uuid}/cert/state"
+    description: >
+      Fingerprint of the CA certificate currently stored on this client. Published on MQTT
+      connect and whenever the certificate is updated via the broadcast rotation topic.
+      Retained. Operators can compare this value against the current Controller certificate
+      fingerprint to verify rotation has propagated to every device.
+    parameters:
+      uuid:
+        $ref: "#/components/parameters/clientUuid"
+    messages:
+      certState:
+        $ref: "#/components/messages/certState"
+
+  ##########################################################
+  ## OTA firmware update                                  ##
+  ##########################################################
+
+  clientUpdateState:
+    address: "FireFly/{uuid}/update/state"
+    description: Firmware update status. Published when an update is available or when an install is in progress.
+    parameters:
+      uuid:
+        $ref: "#/components/parameters/clientUuid"
+    messages:
+      updateAvailable:
+        $ref: "#/components/messages/updateAvailable"
+      updateInProgress:
+        $ref: "#/components/messages/updateInProgress"
+
+  clientUpdateSet:
+    address: "FireFly/{uuid}/update/set"
+    description: Command topic to trigger a firmware OTA update. The client subscribes to this topic. Send the payload "do-update" to initiate the update.
+    parameters:
+      uuid:
+        $ref: "#/components/parameters/clientUuid"
+    messages:
+      updateSet:
+        $ref: "#/components/messages/updateSet"
+
+  ##########################################################
+  ## Diagnostic sensors                                   ##
+  ##########################################################
+
+  clientStartTimeState:
+    address: "FireFly/{uuid}/time-start/state"
+    description: Unix epoch timestamp (seconds) of when the client last booted. Published once on MQTT connect. Retained.
+    parameters:
+      uuid:
+        $ref: "#/components/parameters/clientUuid"
+    messages:
+      startTimeState:
+        $ref: "#/components/messages/epochTimestamp"
+
+  clientIpAddressState:
+    address: "FireFly/{uuid}/ip-address/state"
+    description: Current IPv4 address of the client's WiFi interface. Published once on MQTT connect. Retained.
+    parameters:
+      uuid:
+        $ref: "#/components/parameters/clientUuid"
+    messages:
+      ipAddressState:
+        $ref: "#/components/messages/ipAddress"
+
+  clientMacAddressState:
+    address: "FireFly/{uuid}/mac-address/state"
+    description: WiFi MAC address of the client. Published once on MQTT connect. Retained.
+    parameters:
+      uuid:
+        $ref: "#/components/parameters/clientUuid"
+    messages:
+      macAddressState:
+        $ref: "#/components/messages/macAddress"
+
+  clientCountErrorsState:
+    address: "FireFly/{uuid}/count-errors/state"
+    description: Current count of active errors. Published on MQTT connect and whenever the error count changes. Retained.
+    parameters:
+      uuid:
+        $ref: "#/components/parameters/clientUuid"
+    messages:
+      countErrorsState:
+        $ref: "#/components/messages/errorCount"
+
+  ##########################################################
+  ## Home Assistant auto-discovery                        ##
+  ##########################################################
+
+  haDiscoveryIpAddress:
+    address: "{haRoot}/sensor/FireFly-{uuid}-ip-address/config"
+    description: Home Assistant MQTT discovery config for the IP address sensor. Published once after MQTT connect. Retained.
+    parameters:
+      haRoot:
+        $ref: "#/components/parameters/haRoot"
+      uuid:
+        $ref: "#/components/parameters/clientUuid"
+    messages:
+      haDiscoveryGeneric:
+        $ref: "#/components/messages/haDiscoveryConfig"
+
+  haDiscoveryMacAddress:
+    address: "{haRoot}/sensor/FireFly-{uuid}-mac-address/config"
+    description: Home Assistant MQTT discovery config for the MAC address sensor. Published once after MQTT connect. Retained.
+    parameters:
+      haRoot:
+        $ref: "#/components/parameters/haRoot"
+      uuid:
+        $ref: "#/components/parameters/clientUuid"
+    messages:
+      haDiscoveryGeneric:
+        $ref: "#/components/messages/haDiscoveryConfig"
+
+  haDiscoveryTimeStart:
+    address: "{haRoot}/sensor/FireFly-{uuid}-time-start/config"
+    description: Home Assistant MQTT discovery config for the boot timestamp sensor. Published once after MQTT connect. Retained.
+    parameters:
+      haRoot:
+        $ref: "#/components/parameters/haRoot"
+      uuid:
+        $ref: "#/components/parameters/clientUuid"
+    messages:
+      haDiscoveryGeneric:
+        $ref: "#/components/messages/haDiscoveryConfig"
+
+  haDiscoveryCountErrors:
+    address: "{haRoot}/sensor/FireFly-{uuid}-count-errors/config"
+    description: Home Assistant MQTT discovery config for the error count sensor. Published once after MQTT connect. Retained.
+    parameters:
+      haRoot:
+        $ref: "#/components/parameters/haRoot"
+      uuid:
+        $ref: "#/components/parameters/clientUuid"
+    messages:
+      haDiscoveryGeneric:
+        $ref: "#/components/messages/haDiscoveryConfig"
+
+  haDiscoveryCert:
+    address: "{haRoot}/sensor/FireFly-{uuid}-cert/config"
+    description: Home Assistant MQTT discovery config for the certificate fingerprint sensor. Published once after MQTT connect. Retained.
+    parameters:
+      haRoot:
+        $ref: "#/components/parameters/haRoot"
+      uuid:
+        $ref: "#/components/parameters/clientUuid"
+    messages:
+      haDiscoveryGeneric:
+        $ref: "#/components/messages/haDiscoveryConfig"
+
+  haDiscoveryUpdate:
+    address: "{haRoot}/update/FireFly-{uuid}-update/config"
+    description: Home Assistant MQTT discovery config for the firmware update entity. Published once after MQTT connect. Retained.
+    parameters:
+      haRoot:
+        $ref: "#/components/parameters/haRoot"
+      uuid:
+        $ref: "#/components/parameters/clientUuid"
+    messages:
+      haDiscoveryGeneric:
+        $ref: "#/components/messages/haDiscoveryConfig"
+
+
+##########################################################
+## Operations                                           ##
+##########################################################
+
+operations:
+
+  ##########################################################
+  ## Publish (client sends)                              ##
+  ##########################################################
+
+  publishClientAvailability:
+    action: send
+    channel:
+      $ref: "#/channels/clientAvailability"
+    summary: Publish device-level client availability
+    description: >
+      Published "online" when the client connects to the broker and "offline"
+      as the MQTT Last Will and Testament when the connection drops unexpectedly.
+      The retain flag is set so new subscribers immediately learn the current state.
+    messages:
+      - $ref: "#/channels/clientAvailability/messages/availability"
+
+  publishClientCertState:
+    action: send
+    channel:
+      $ref: "#/channels/clientCertState"
+    summary: Publish current certificate fingerprint
+    description: >
+      Published once on MQTT connect and again whenever the certificate is updated
+      via the cert rotation broadcast. The retain flag is set. Operators use this
+      to verify cert rotation has reached every device.
+    messages:
+      - $ref: "#/channels/clientCertState/messages/certState"
+
+  publishClientUpdateState:
+    action: send
+    channel:
+      $ref: "#/channels/clientUpdateState"
+    summary: Publish firmware update status
+    description: >
+      Published when an OTA update is available (with version metadata) or when
+      an install is initiated or in progress.
+    messages:
+      - $ref: "#/channels/clientUpdateState/messages/updateAvailable"
+      - $ref: "#/channels/clientUpdateState/messages/updateInProgress"
+
+  publishClientStartTimeState:
+    action: send
+    channel:
+      $ref: "#/channels/clientStartTimeState"
+    summary: Publish client boot timestamp
+    description: Published once on MQTT connect. Contains the Unix epoch timestamp (seconds) of when the device booted. The retain flag is set.
+    messages:
+      - $ref: "#/channels/clientStartTimeState/messages/startTimeState"
+
+  publishClientIpAddressState:
+    action: send
+    channel:
+      $ref: "#/channels/clientIpAddressState"
+    summary: Publish client IP address
+    description: Published once on MQTT connect. Contains the current IPv4 address as a dotted-decimal string. The retain flag is set.
+    messages:
+      - $ref: "#/channels/clientIpAddressState/messages/ipAddressState"
+
+  publishClientMacAddressState:
+    action: send
+    channel:
+      $ref: "#/channels/clientMacAddressState"
+    summary: Publish client MAC address
+    description: Published once on MQTT connect. Contains the WiFi MAC address in colon-delimited uppercase hex notation. The retain flag is set.
+    messages:
+      - $ref: "#/channels/clientMacAddressState/messages/macAddressState"
+
+  publishClientCountErrorsState:
+    action: send
+    channel:
+      $ref: "#/channels/clientCountErrorsState"
+    summary: Publish active error count
+    description: Published on MQTT connect and whenever the error count changes. The retain flag is set.
+    messages:
+      - $ref: "#/channels/clientCountErrorsState/messages/countErrorsState"
+
+  publishHaDiscoveryIpAddress:
+    action: send
+    channel:
+      $ref: "#/channels/haDiscoveryIpAddress"
+    summary: Publish Home Assistant discovery config for the IP address sensor
+    description: Published once after MQTT connect. The retain flag is set.
+    messages:
+      - $ref: "#/channels/haDiscoveryIpAddress/messages/haDiscoveryGeneric"
+
+  publishHaDiscoveryMacAddress:
+    action: send
+    channel:
+      $ref: "#/channels/haDiscoveryMacAddress"
+    summary: Publish Home Assistant discovery config for the MAC address sensor
+    description: Published once after MQTT connect. The retain flag is set.
+    messages:
+      - $ref: "#/channels/haDiscoveryMacAddress/messages/haDiscoveryGeneric"
+
+  publishHaDiscoveryTimeStart:
+    action: send
+    channel:
+      $ref: "#/channels/haDiscoveryTimeStart"
+    summary: Publish Home Assistant discovery config for the boot timestamp sensor
+    description: Published once after MQTT connect. The retain flag is set.
+    messages:
+      - $ref: "#/channels/haDiscoveryTimeStart/messages/haDiscoveryGeneric"
+
+  publishHaDiscoveryCountErrors:
+    action: send
+    channel:
+      $ref: "#/channels/haDiscoveryCountErrors"
+    summary: Publish Home Assistant discovery config for the error count sensor
+    description: Published once after MQTT connect. The retain flag is set.
+    messages:
+      - $ref: "#/channels/haDiscoveryCountErrors/messages/haDiscoveryGeneric"
+
+  publishHaDiscoveryCert:
+    action: send
+    channel:
+      $ref: "#/channels/haDiscoveryCert"
+    summary: Publish Home Assistant discovery config for the certificate fingerprint sensor
+    description: Published once after MQTT connect. The retain flag is set.
+    messages:
+      - $ref: "#/channels/haDiscoveryCert/messages/haDiscoveryGeneric"
+
+  publishHaDiscoveryUpdate:
+    action: send
+    channel:
+      $ref: "#/channels/haDiscoveryUpdate"
+    summary: Publish Home Assistant discovery config for the firmware update entity
+    description: Published once after MQTT connect. The retain flag is set.
+    messages:
+      - $ref: "#/channels/haDiscoveryUpdate/messages/haDiscoveryGeneric"
+
+  ##########################################################
+  ## Subscribe (client receives)                         ##
+  ##########################################################
+
+  receiveInputChannelState:
+    action: receive
+    channel:
+      $ref: "#/channels/inputChannelState"
+    summary: Receive input channel state from the Controller
+    description: >
+      The client subscribes to this topic for each configured HID channel on MQTT connect.
+      On receipt the client adjusts the corresponding LED:
+        NORMAL — restore LED to its retained brightness (button at rest or released).
+        SHORT — turn LED off for the duration of the press.
+        LONG — turn LED off while held (long-press behavior TBD).
+        EXCESSIVE — flash LED 3 times at 100 ms on / 100 ms off, then restore retained brightness.
+      Assumes normally-open button contacts.
+    messages:
+      - $ref: "#/channels/inputChannelState/messages/inputState"
+
+  receiveClientLedBrightnessSet:
+    action: receive
+    channel:
+      $ref: "#/channels/clientLedBrightnessSet"
+    summary: Receive LED brightness command
+    description: >
+      The client subscribes to this topic on MQTT connect. The payload is a numeric
+      brightness percentage (0–100) applied to all configured LEDs. The value is
+      persisted as the retained brightness so subsequent button events restore to
+      the commanded level, not a hardcoded default.
+    messages:
+      - $ref: "#/channels/clientLedBrightnessSet/messages/ledBrightnessSet"
+
+  receiveClientUpdateSet:
+    action: receive
+    channel:
+      $ref: "#/channels/clientUpdateSet"
+    summary: Receive firmware update install command
+    description: >
+      The client subscribes to this topic on MQTT connect. Send "do-update"
+      to trigger an OTA firmware update. Any other payload is ignored.
+    messages:
+      - $ref: "#/channels/clientUpdateSet/messages/updateSet"
+
+  receiveCertBroadcast:
+    action: receive
+    channel:
+      $ref: "#/channels/clientCertBroadcast"
+    summary: Receive CA certificate rotation broadcast
+    description: >
+      The client subscribes to this topic on MQTT connect. Because the message is
+      retained by the broker, devices that were offline at rotation time receive it
+      automatically on reconnect. If the fingerprint in the payload differs from the
+      locally stored fingerprint, the client writes the new PEM to LittleFS and
+      updates its in-memory BearSSL context. The updated fingerprint is then
+      published to the per-device cert state topic.
+    messages:
+      - $ref: "#/channels/clientCertBroadcast/messages/certBroadcast"
+
+
+##########################################################
+## Components                                           ##
+##########################################################
+
+components:
+
+  ##########################################################
+  ## Security                                             ##
+  ##########################################################
+
+  securitySchemes:
+    userPassword:
+      type: userPassword
+      description: Username and password credentials for the MQTT broker
+
+  ##########################################################
+  ## Parameters                                           ##
+  ##########################################################
+
+  parameters:
+
+    clientUuid:
+      description: UUIDv4 uniquely identifying this client, assigned by the Controller during provisioning
+      examples:
+        - 3fa85f64-5717-4562-b3fc-2c963f66afa6
+
+    portId:
+      description: >
+        Human-assigned alphanumeric identifier for an input port on the Controller
+        (max 8 characters). Matches the portId parameter in the Controller's asyncAPI.
+        The client receives this value in the provisioning payload as the "id" field
+        on each hid entry.
+      examples:
+        - S16
+        - S22
+
+    channelNumber:
+      description: >
+        Input channel number within the port (1–4 for primary jack channels; 5–6 for
+        extended jack channels). Equals the hid key number in the provisioning payload.
+      examples:
+        - "1"
+        - "5"
+
+    haRoot:
+      description: >
+        Home Assistant MQTT discovery root topic prefix. Defaults to "homeassistant"
+        but can be changed in the Home Assistant MQTT integration settings.
+      default: homeassistant
+
+  ##########################################################
+  ## Messages                                             ##
+  ##########################################################
+
+  messages:
+
+    availability:
+      name: availability
+      title: Availability
+      summary: Indicates whether the device is online or offline
+      contentType: text/plain
+      payload:
+        $ref: "#/components/schemas/availabilityPayload"
+      examples:
+        - name: online
+          payload: online
+        - name: offline
+          payload: offline
+
+    inputState:
+      name: inputState
+      title: Input Channel State
+      summary: The current state of an input channel as published by the Controller
+      contentType: text/plain
+      payload:
+        $ref: "#/components/schemas/inputStatePayload"
+      examples:
+        - name: normal
+          payload: NORMAL
+        - name: short
+          payload: SHORT
+        - name: long
+          payload: LONG
+        - name: excessive
+          payload: EXCESSIVE
+
+    ledBrightnessSet:
+      name: ledBrightnessSet
+      title: LED Brightness Set Command
+      summary: Command to set the brightness of all configured LEDs (0–100)
+      contentType: text/plain
+      payload:
+        $ref: "#/components/schemas/ledBrightnessSetPayload"
+      examples:
+        - name: full
+          payload: "100"
+        - name: half
+          payload: "50"
+        - name: off
+          payload: "0"
+
+    certBroadcast:
+      name: certBroadcast
+      title: CA Certificate Rotation Broadcast
+      summary: Broadcast payload containing an updated CA certificate for all clients
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/certBroadcastPayload"
+      examples:
+        - name: rotation
+          payload:
+            fingerprint: "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99"
+            pem: "-----BEGIN CERTIFICATE-----\nMIID...base64...\n-----END CERTIFICATE-----\n"
+
+    certState:
+      name: certState
+      title: Certificate Fingerprint State
+      summary: SHA-256 fingerprint of the CA certificate currently stored on this client
+      contentType: text/plain
+      payload:
+        $ref: "#/components/schemas/certStatePayload"
+      examples:
+        - name: typical
+          payload: "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99"
+
+    updateAvailable:
+      name: updateAvailable
+      title: Firmware Update Available
+      summary: Firmware update status with version information
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/updateAvailablePayload"
+      examples:
+        - name: update-available
+          payload:
+            installed_version: "2025.04.01"
+            latest_version: "2025.05.01"
+            in_progress: false
+
+    updateInProgress:
+      name: updateInProgress
+      title: Firmware Update In Progress
+      summary: Firmware OTA update has been initiated
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/updateInProgressPayload"
+      examples:
+        - name: started
+          payload:
+            in_progress: true
+
+    updateSet:
+      name: updateSet
+      title: Firmware Update Install Command
+      summary: Command to trigger a firmware OTA update
+      contentType: text/plain
+      payload:
+        $ref: "#/components/schemas/updateSetPayload"
+      examples:
+        - name: install
+          payload: do-update
+
+    epochTimestamp:
+      name: epochTimestamp
+      title: Unix Epoch Timestamp
+      summary: A Unix epoch time value in seconds, encoded as a decimal string
+      contentType: text/plain
+      payload:
+        $ref: "#/components/schemas/epochTimestampPayload"
+      examples:
+        - name: typical
+          payload: "1709398094"
+
+    ipAddress:
+      name: ipAddress
+      title: IPv4 Address
+      summary: An IPv4 address in dotted-decimal notation
+      contentType: text/plain
+      payload:
+        $ref: "#/components/schemas/ipAddressPayload"
+      examples:
+        - name: typical
+          payload: "192.168.10.101"
+
+    macAddress:
+      name: macAddress
+      title: MAC Address
+      summary: A WiFi MAC address in uppercase colon-delimited hex notation
+      contentType: text/plain
+      payload:
+        $ref: "#/components/schemas/macAddressPayload"
+      examples:
+        - name: typical
+          payload: "A1:B2:C3:D4:E5:F6"
+
+    errorCount:
+      name: errorCount
+      title: Active Error Count
+      summary: Number of active (unresolved) errors
+      contentType: text/plain
+      payload:
+        $ref: "#/components/schemas/errorCountPayload"
+      examples:
+        - name: no-errors
+          payload: "0"
+        - name: two-errors
+          payload: "2"
+
+    haDiscoveryConfig:
+      name: haDiscoveryConfig
+      title: Home Assistant Discovery — Generic Entity
+      summary: Home Assistant MQTT discovery payload for a generic entity
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/haDiscoveryConfigPayload"
+
+  ##########################################################
+  ## Schemas                                              ##
+  ##########################################################
+
+  schemas:
+
+    availabilityPayload:
+      type: string
+      enum:
+        - online
+        - offline
+      description: Online/offline availability string
+
+    inputStatePayload:
+      type: string
+      enum:
+        - NORMAL
+        - SHORT
+        - LONG
+        - EXCESSIVE
+      description: >
+        Current state of an input channel as published by the Controller.
+        NORMAL = button at rest or released — client restores LED to retained brightness.
+        SHORT = brief press — client turns LED off.
+        LONG = held beyond short-press threshold — client LED behavior TBD.
+        EXCESSIVE = press count exceeded maximum — client flashes LED 3× at 100 ms on/off.
+
+    ledBrightnessSetPayload:
+      type: string
+      description: >
+        Brightness percentage as a decimal integer string in the range 0 (off) to 100 (full).
+        Applied to all configured LEDs and stored as the retained brightness level.
+      pattern: "^(100|[0-9]{1,2})$"
+      examples:
+        - "100"
+        - "50"
+        - "0"
+
+    certBroadcastPayload:
+      type: object
+      description: CA certificate rotation payload broadcast to all clients
+      required:
+        - fingerprint
+        - pem
+      properties:
+        fingerprint:
+          type: string
+          description: SHA-256 fingerprint of the certificate in colon-separated uppercase hex pairs
+          examples:
+            - "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99"
+        pem:
+          type: string
+          description: PEM-encoded CA certificate including BEGIN/END markers and newlines
+
+    certStatePayload:
+      type: string
+      description: SHA-256 fingerprint of the locally stored CA certificate in colon-separated uppercase hex pairs
+      examples:
+        - "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99"
+
+    updateAvailablePayload:
+      type: object
+      description: Firmware update status message with version details
+      required:
+        - installed_version
+        - latest_version
+        - in_progress
+      properties:
+        installed_version:
+          type: string
+          description: Currently installed firmware version
+          examples:
+            - "2025.04.01"
+        latest_version:
+          type: string
+          description: Latest available firmware version
+          examples:
+            - "2025.05.01"
+        in_progress:
+          type: boolean
+          description: Whether a firmware install is currently in progress
+
+    updateInProgressPayload:
+      type: object
+      description: Firmware OTA install in-progress notification
+      required:
+        - in_progress
+      properties:
+        in_progress:
+          type: boolean
+          description: Always true when this message variant is published
+
+    updateSetPayload:
+      type: string
+      description: Command payload to initiate a firmware OTA update
+      enum:
+        - do-update
+
+    epochTimestampPayload:
+      type: string
+      description: Unix epoch time in seconds as a decimal string
+      examples:
+        - "1709398094"
+
+    ipAddressPayload:
+      type: string
+      description: IPv4 address in dotted-decimal notation
+      examples:
+        - "192.168.10.101"
+
+    macAddressPayload:
+      type: string
+      description: WiFi MAC address in uppercase colon-delimited hex notation
+      pattern: "^([0-9A-F]{2}:){5}[0-9A-F]{2}$"
+      examples:
+        - "A1:B2:C3:D4:E5:F6"
+
+    errorCountPayload:
+      type: string
+      description: Count of active unresolved errors as a decimal string
+      examples:
+        - "0"
+        - "2"
+
+    haDiscoveryConfigPayload:
+      type: object
+      description: >
+        Generic Home Assistant MQTT discovery payload. Exact fields vary by entity
+        type (sensor, update, etc.) and follow the Home Assistant MQTT discovery specification.
+      properties:
+        name:
+          type: string
+          description: Entity display name
+        unique_id:
+          type: string
+          description: Globally unique entity identifier
+        icon:
+          type: string
+          description: MDI icon reference
+        state_topic:
+          type: string
+          description: Topic where the entity state is published
+        availability_topic:
+          type: string
+          description: Topic used for single-topic availability
+        device:
+          type: object
+          description: Device grouping information

@@ -319,17 +319,31 @@ bool loadConfig() {
     cfg.mqttPassword = doc["mqtt"]["password"].as<String>();
     cfg.otaUrl       = doc["ota"]["url"].as<String>();
 
+    // Initialize all slots; unconfigured slots stay with empty portId
+    for (int i = 0; i < LED_CHANNEL_COUNT; i++) {
+        cfg.leds[i].pin = LED_PINS[i];
+        cfg.leds[i].portId = "";
+        cfg.leds[i].channelNumber = 0;
+        cfg.leds[i].retainedBrightness = 0;
+        cfg.leds[i].savedBrightness = 0;
+        cfg.leds[i].excessiveFlashStep = 0;
+    }
+
+    // Hids are keyed 1–6 (1-indexed); the key IS the channelNumber in the MQTT topic.
+    // Iterate by explicit key so HID numbering is stable regardless of inversion or count.
     cfg.ledCount = 0;
-    JsonArray hids = doc["hids"].as<JsonArray>();
-    for (JsonObject hid : hids) {
-        if (cfg.ledCount >= LED_CHANNEL_COUNT) break;
-        int idx = cfg.ledCount++;
-        cfg.leds[idx].pin                = LED_PINS[idx];
-        cfg.leds[idx].portId             = hid["portId"].as<String>();
-        cfg.leds[idx].channelNumber      = hid["channelNumber"].as<int>();
+    JsonObject hids = doc["hids"].as<JsonObject>();
+    for (int ch = 1; ch <= LED_CHANNEL_COUNT; ch++) {
+        JsonObject hid = hids[String(ch)];
+        if (hid.isNull()) continue;
+        String portId = hid["id"].as<String>();
+        if (portId.length() == 0) continue;
+        int idx = ch - 1;  // 0-based index into LED_PINS[]
+        cfg.leds[idx].portId             = portId;
+        cfg.leds[idx].channelNumber      = ch;
         cfg.leds[idx].retainedBrightness = percentToPwm(hid["defaultBrightness"] | 100);
         cfg.leds[idx].savedBrightness    = cfg.leds[idx].retainedBrightness;
-        cfg.leds[idx].excessiveFlashStep = 0;
+        cfg.ledCount = ch;
     }
 
     return cfg.uuid.length() > 0 && cfg.wifiSsid.length() > 0;
@@ -388,9 +402,10 @@ void connectMqtt() {
 
     mqttClient.publish(availTopic.c_str(), "online", true);
 
-    // Subscribe to input state topics for each configured LED channel
+    // Subscribe to input state topics for each configured HID channel
     char topic[128];
     for (int i = 0; i < cfg.ledCount; i++) {
+        if (cfg.leds[i].portId.length() == 0) continue;
         snprintf(topic, sizeof(topic), MQTT_INPUT_STATE_TOPIC,
                  cfg.leds[i].portId.c_str(), cfg.leds[i].channelNumber);
         mqttClient.subscribe(topic);
@@ -408,6 +423,7 @@ void connectMqtt() {
     }
 
     for (int i = 0; i < cfg.ledCount; i++) {
+        if (cfg.leds[i].portId.length() == 0) continue;
         ledWrite(cfg.leds[i].pin, cfg.leds[i].retainedBrightness);
     }
 }
@@ -467,6 +483,7 @@ void handleInputState(const String& portId, int channelNumber, const String& sta
             ledWrite(cfg.leds[i].pin, 0);
 
         } else if (state == "LONG") {
+            // Long-press LED behavior is TBD; treating same as SHORT for now
             cfg.leds[i].savedBrightness = cfg.leds[i].retainedBrightness;
             ledWrite(cfg.leds[i].pin, 0);
 
@@ -508,13 +525,14 @@ void tickExcessiveFlash(int idx) {
 
 // ─── LED: brightness commands ────────────────────────────────────────────────
 
-// Payload is a numeric brightness percentage (0–100), applied globally to all LEDs
+// Payload is a numeric brightness percentage (0–100), applied to all configured LEDs
 void handleBrightnessCommand(const String& payload) {
     int pct = payload.toInt();
     if (pct < 0)   pct = 0;
     if (pct > 100) pct = 100;
     int pwm = percentToPwm(pct);
     for (int i = 0; i < cfg.ledCount; i++) {
+        if (cfg.leds[i].portId.length() == 0) continue;
         setLedRetained(i, pwm);
     }
 }
