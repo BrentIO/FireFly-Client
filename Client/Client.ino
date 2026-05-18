@@ -697,7 +697,6 @@ void checkOta() {
     // a littlefs field, refuse the update — flashing the config partition would
     // wipe WiFi credentials, MQTT config, and the CA cert.
     if (!doc["littlefs"].isNull()) {
-        errorCount++;
         return;
     }
 
