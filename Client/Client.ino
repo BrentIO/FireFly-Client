@@ -25,7 +25,6 @@
 
 // ─── Timing constants ────────────────────────────────────────────────────────
 
-#define HEALTH_PUBLISH_INTERVAL_MS    1680000UL   // 28 minutes
 #define OTA_CHECK_INTERVAL_MS         86400000UL  // 24 hours
 #define OTA_BOOT_DELAY_MS             30000UL     // 30 seconds after boot
 #define MQTT_RECONNECT_INTERVAL_MS    5000UL
@@ -113,7 +112,6 @@ String certFingerprint;
 int    errorCount = 0;
 time_t bootTime   = 0;
 
-unsigned long lastHealthPublish = 0;
 unsigned long lastOtaCheck      = 0;
 unsigned long lastMqttAttempt   = 0;
 unsigned long lastWifiAttempt   = 0;
@@ -208,10 +206,6 @@ void loop() {
     }
 
     mqttClient.loop();
-
-    if (millis() - lastHealthPublish >= HEALTH_PUBLISH_INTERVAL_MS) {
-        publishTelemetry();
-    }
 
     unsigned long now = millis();
     if (bootTime > 0 && lastOtaCheck == 0 && now >= OTA_BOOT_DELAY_MS) {
@@ -605,7 +599,6 @@ String buildTopic(const char* pattern) {
 // ─── Telemetry ───────────────────────────────────────────────────────────────
 
 void publishTelemetry() {
-    lastHealthPublish = millis();
     mqttClient.publish(buildTopic(MQTT_IP_ADDRESS_TOPIC).c_str(),  WiFi.localIP().toString().c_str(), true);
     mqttClient.publish(buildTopic(MQTT_MAC_ADDRESS_TOPIC).c_str(), WiFi.macAddress().c_str(), true);
     char buf[16];
