@@ -35,6 +35,7 @@ jobs:
                         .board_options | to_entries | map(.key + "=" + .value) | join(",")
                       )
                     ),
+                    bootloader_addr: .bootloader_addr,
                     partition_size_app: (
                       .partition_scheme[]
                       | select(.label == "app0")
