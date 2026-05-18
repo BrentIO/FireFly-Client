@@ -7,6 +7,10 @@
 
 #define HARDWARE_CLASS "client"
 
+#ifndef HARDWARE_MANUFACTURER_NAME
+    #define HARDWARE_MANUFACTURER_NAME "P5 Software LLC"
+#endif
+
 /* Hardware Types */
 #if PRODUCT_HEX == 0x06002011
     #include "devices/FFI0600-2011.h"
