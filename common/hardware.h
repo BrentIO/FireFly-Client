@@ -20,7 +20,28 @@
     #error "Build failed, Unknown PRODUCT_HEX. Ensure it was set in build flags: -DPRODUCT_HEX=0x06002011"
 #endif
 
+/* Device identity */
+#ifdef ESP8266
+    #include "deviceIdentityEEPROM.h"
+#endif
+
 /* Timing defaults — device headers may override any of these before this point */
+
+#ifndef FLASH_ERROR_SHORT_MS
+    #define FLASH_ERROR_SHORT_MS  500UL
+#endif
+
+#ifndef FLASH_ERROR_LONG_MS
+    #define FLASH_ERROR_LONG_MS   1000UL
+#endif
+
+#ifndef FLASH_ERROR_GAP_MS
+    #define FLASH_ERROR_GAP_MS    250UL
+#endif
+
+#ifndef FLASH_ERROR_PAUSE_MS
+    #define FLASH_ERROR_PAUSE_MS  1000UL
+#endif
 
 #ifndef MQTT_RECONNECT_WAIT_MILLISECONDS
     #define MQTT_RECONNECT_WAIT_MILLISECONDS 5000UL
@@ -44,6 +65,11 @@
 
 #ifndef UNPROV_ROTATE_INTERVAL_MS
     #define UNPROV_ROTATE_INTERVAL_MS 200UL
+#endif
+
+/* Device identity instance */
+#ifdef ESP8266
+    managerDeviceIdentity deviceIdentity;
 #endif
 
 /* LED channel index → GPIO pin mapping */
