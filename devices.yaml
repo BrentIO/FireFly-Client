@@ -24,7 +24,11 @@ devices:
       - label: app1
         address: "0x101000"
         size: "0x100000"
-      - label: littlefs
+      # Label is documentary only on ESP8266 — LittleFS.begin() locates the filesystem
+      # by the address baked into the core at compile time (via eesz board option), not
+      # by this label. ESP8266httpUpdate never touches this partition. If an ESP32 variant
+      # is ever added, partition labels DO matter at runtime and must match the core expectation.
+      - label: config
         address: "0x200000"
         size: "0x1FB000"
       - label: rf_cal
