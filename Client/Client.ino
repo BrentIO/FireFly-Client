@@ -667,7 +667,10 @@ void checkOta() {
     if (cfg.otaUrl.length() == 0) return;
 
     String url = cfg.otaUrl;
-    if (!url.endsWith("/")) url += "/";
+    char hexStr[16];
+    snprintf(hexStr, sizeof(hexStr), "0x%08X", (uint32_t)PRODUCT_HEX);
+    url.replace("$$hex$$", hexStr);
+    url.replace("$$class$$", HARDWARE_CLASS);
     url += "?current_version=";
     url += VERSION;
 
