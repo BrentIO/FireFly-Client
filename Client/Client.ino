@@ -23,14 +23,6 @@
     #define COMMIT_HASH ""
 #endif
 
-// ─── Timing constants ────────────────────────────────────────────────────────
-
-#define OTA_CHECK_INTERVAL_MS         86400000UL  // 24 hours
-#define OTA_BOOT_DELAY_MS             30000UL     // 30 seconds after boot
-#define MQTT_RECONNECT_INTERVAL_MS    5000UL
-#define PROVISIONING_SCAN_INTERVAL_MS 10000UL
-#define UNPROV_ROTATE_INTERVAL_MS     200UL       // LED rotation speed when unprovisioned
-
 // EXCESSIVE flash: 3 flashes, 100ms on / 100ms off — non-blocking
 #define EXCESSIVE_FLASH_COUNT   3
 #define EXCESSIVE_FLASH_ON_MS   100UL
@@ -39,8 +31,6 @@
 // LONG press: 100ms full-brightness flash, then hold at half retained (5% floor)
 #define LONG_FLASH_ON_MS           100UL
 #define LONG_HOLD_FLOOR_PCT        5
-
-#define WIFI_RECONNECT_INTERVAL_MS 10000UL
 
 // ─── File paths ───────────────────────────────────────────────────────────────
 
@@ -205,7 +195,7 @@ void loop() {
     }
 
     if (!mqttClient.connected()) {
-        if (millis() - lastMqttAttempt >= MQTT_RECONNECT_INTERVAL_MS) {
+        if (millis() - lastMqttAttempt >= MQTT_RECONNECT_WAIT_MILLISECONDS) {
             connectMqtt();
         }
         return;
