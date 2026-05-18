@@ -693,13 +693,6 @@ void checkOta() {
     JsonDocument doc;
     if (deserializeJson(doc, body) != DeserializationError::Ok) return;
 
-    // Client builds never include a filesystem image. If the manifest contains
-    // a littlefs field, refuse the update — flashing the config partition would
-    // wipe WiFi credentials, MQTT config, and the CA cert.
-    if (!doc["littlefs"].isNull()) {
-        return;
-    }
-
     String latestVersion = doc["version"].as<String>();
     String firmwareUrl   = doc["url"].as<String>();
 
