@@ -78,7 +78,6 @@ struct LedChannel {
 };
 
 struct Config {
-    String     uuid;
     String     wifiSsid;
     String     wifiPassword;
     String     mqttHost;
@@ -115,6 +114,7 @@ unsigned long unProvRotateAt    = 0;
 
 // ─── Forward declarations ─────────────────────────────────────────────────────
 
+void   haltWithFlashCode(uint8_t shortBursts, uint8_t longBursts);
 void   runProvisioningMode();
 bool   loadConfig();
 bool   saveConfig(const String& json);
@@ -139,6 +139,17 @@ String buildTopic(const char* pattern);
 
 void setup() {
 
+    deviceIdentity.begin();
+
+    for (int i = 0; i < LED_CHANNEL_COUNT; i++) {
+        pinMode(LED_PINS[i], OUTPUT);
+        ledWrite(LED_PINS[i], 0);
+    }
+
+    if (!deviceIdentity.enabled) {
+        haltWithFlashCode(3, 1);
+    }
+
     pinMode(FACTORY_RESET_PIN, INPUT_PULLUP);
 
     if (digitalRead(FACTORY_RESET_PIN) == LOW) {
@@ -148,11 +159,6 @@ void setup() {
         LittleFS.remove(CERT_FP_FILE);
         LittleFS.end();
         ESP.restart();
-    }
-
-    for (int i = 0; i < LED_CHANNEL_COUNT; i++) {
-        pinMode(LED_PINS[i], OUTPUT);
-        ledWrite(LED_PINS[i], 0);
     }
 
     if (!LittleFS.begin()) {
@@ -320,7 +326,6 @@ bool loadConfig() {
     if (deserializeJson(doc, f) != DeserializationError::Ok) { f.close(); return false; }
     f.close();
 
-    cfg.uuid         = doc["uuid"].as<String>();
     cfg.wifiSsid     = doc["wifi"]["ssid"].as<String>();
     cfg.wifiPassword = doc["wifi"]["password"].as<String>();
     cfg.mqttHost     = doc["mqtt"]["host"].as<String>();
@@ -357,7 +362,7 @@ bool loadConfig() {
         cfg.ledCount = ch;
     }
 
-    return cfg.uuid.length() > 0 && cfg.wifiSsid.length() > 0;
+    return cfg.wifiSsid.length() > 0;
 }
 
 bool saveConfig(const String& json) {
@@ -400,7 +405,7 @@ void connectMqtt() {
 
     String availTopic = buildTopic(MQTT_AVAILABILITY_TOPIC);
     bool connected = mqttClient.connect(
-        cfg.uuid.c_str(),
+        deviceIdentity.data.uuid,
         cfg.mqttUsername.c_str(),
         cfg.mqttPassword.c_str(),
         availTopic.c_str(), 0, true, "offline"
@@ -569,6 +574,27 @@ void setLedRetained(int idx, int pwmValue) {
     }
 }
 
+// ─── LED: fatal flash code (never returns) ───────────────────────────────────
+
+void haltWithFlashCode(uint8_t shortBursts, uint8_t longBursts) {
+    while (true) {
+        for (uint8_t s = 0; s < shortBursts; s++) {
+            for (int i = 0; i < LED_CHANNEL_COUNT; i++) ledWrite(LED_PINS[i], LED_PWM_MAX);
+            delay(FLASH_ERROR_SHORT_MS);
+            for (int i = 0; i < LED_CHANNEL_COUNT; i++) ledWrite(LED_PINS[i], 0);
+            if (s < shortBursts - 1) delay(FLASH_ERROR_GAP_MS);
+        }
+        delay(FLASH_ERROR_PAUSE_MS);
+        for (uint8_t l = 0; l < longBursts; l++) {
+            for (int i = 0; i < LED_CHANNEL_COUNT; i++) ledWrite(LED_PINS[i], LED_PWM_MAX);
+            delay(FLASH_ERROR_LONG_MS);
+            for (int i = 0; i < LED_CHANNEL_COUNT; i++) ledWrite(LED_PINS[i], 0);
+            if (l < longBursts - 1) delay(FLASH_ERROR_GAP_MS);
+        }
+        delay(FLASH_ERROR_PAUSE_MS);
+    }
+}
+
 // ─── LED: unprovisioned rotation ─────────────────────────────────────────────
 
 void rotateLeds() {
@@ -590,7 +616,7 @@ int percentToPwm(int pct) {
 
 String buildTopic(const char* pattern) {
     char buf[128];
-    snprintf(buf, sizeof(buf), pattern, cfg.uuid.c_str());
+    snprintf(buf, sizeof(buf), pattern, deviceIdentity.data.uuid);
     return String(buf);
 }
 
@@ -613,7 +639,7 @@ void publishTelemetry() {
 
 void publishAutoDiscovery() {
 
-    String uuid  = cfg.uuid;
+    String uuid  = String(deviceIdentity.data.uuid);
     String avail = buildTopic(MQTT_AVAILABILITY_TOPIC);
 
     auto addDevice = [&](JsonDocument& doc) {
