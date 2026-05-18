@@ -6,13 +6,14 @@
 
 #include <EEPROM.h>
 
-#define DEVICE_IDENTITY_EEPROM_SIZE  54
+#define DEVICE_IDENTITY_EEPROM_SIZE  87
 #define DEVICE_IDENTITY_MAGIC_0      0x1E  /* ASCII Record Separator */
 #define DEVICE_IDENTITY_MAGIC_1      0x04  /* ASCII End of Transmission */
 #define DEVICE_IDENTITY_OFFSET_MAGIC  0
 #define DEVICE_IDENTITY_OFFSET_UUID   2
 #define DEVICE_IDENTITY_OFFSET_PHEX  18
 #define DEVICE_IDENTITY_OFFSET_KEY   22
+#define DEVICE_IDENTITY_OFFSET_PID   54
 
 class managerDeviceIdentity {
 
@@ -57,7 +58,7 @@ class managerDeviceIdentity {
          * Read identity from EEPROM. If magic bytes are absent or UUID is
          * all-zero, enabled is set false and no further action is taken.
          * If product_hex is present but does not match the compile-time
-         * PRODUCT_HEX, the device halts in an infinite loop.
+         * PRODUCT_HEX, enabled is set false and no further action is taken.
          * EEPROM is released (end()) before returning.
          */
         void begin() {
@@ -95,6 +96,11 @@ class managerDeviceIdentity {
                 data.key[i] = EEPROM.read(DEVICE_IDENTITY_OFFSET_KEY + i);
             }
 
+            for (int i = 0; i < 32; i++) {
+                data.product_id[i] = (char)EEPROM.read(DEVICE_IDENTITY_OFFSET_PID + i);
+            }
+            data.product_id[32] = '\0';
+
             EEPROM.end();
 
             uuidBytesToString(uuidBytes, data.uuid);
@@ -105,15 +111,14 @@ class managerDeviceIdentity {
                 // so setup() can call haltWithFlashCode() with the LEDs already init'd.
                 return;
             }
-            strlcpy(data.product_id, PRODUCT_ID, sizeof(data.product_id));
             enabled = true;
         }
 
         /**
          * Write identity to EEPROM. Returns false if already enabled (one-write
          * semantics: once written the identity cannot be overwritten).
-         * Caller must populate data.uuid (as a string), data.product_hex, and
-         * data.key before calling write().
+         * Caller must populate data.uuid (as a string), data.product_id,
+         * data.product_hex, and data.key before calling write().
          */
         bool write() {
             if (enabled) return false;
@@ -138,10 +143,14 @@ class managerDeviceIdentity {
                 EEPROM.write(DEVICE_IDENTITY_OFFSET_KEY + i, data.key[i]);
             }
 
+            for (int i = 0; i < 32; i++) {
+                EEPROM.write(DEVICE_IDENTITY_OFFSET_PID + i, (uint8_t)data.product_id[i]);
+            }
+            EEPROM.write(DEVICE_IDENTITY_OFFSET_PID + 32, 0x00);
+
             EEPROM.commit();
             EEPROM.end();
 
-            strlcpy(data.product_id, PRODUCT_ID, sizeof(data.product_id));
             enabled = true;
             return true;
         }
