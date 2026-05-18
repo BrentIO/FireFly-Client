@@ -150,6 +150,34 @@ jobs:
               --output-dir "$OUTDIR"
           fi
 
+      - name: Generate synthetic ESP8266 partition table
+        run: |
+          OUTDIR="${{ env.ARTIFACT_ROOT }}/${{ matrix.product_id }}/${{ matrix.application }}/${{ env.BRANCH }}-${{ env.COMMIT_HASH }}"
+          PARTITIONS_JSON=$(yq -o=json ".devices[] | select(.product_hex == \"${{ matrix.product_hex }}\") | .partition_scheme" devices.yaml)
+
+          PARTITIONS_JSON="$PARTITIONS_JSON" \
+          OUTDIR="$OUTDIR" \
+          APPLICATION="${{ matrix.application }}" \
+          python3 - <<'PYEOF'
+          import struct, json, os
+
+          partitions = json.loads(os.environ['PARTITIONS_JSON'])
+          outfile = os.path.join(os.environ['OUTDIR'], f"{os.environ['APPLICATION']}.ino.partitions.bin")
+
+          data = b''
+          for p in partitions:
+              name = p['label'].encode()[:16].ljust(16, b'\x00')
+              entry = bytes([0xAA, 0x50, 0x00, 0x00])
+              entry += struct.pack('<II', int(p['address'], 16), int(p['size'], 16))
+              entry += name
+              entry += struct.pack('<I', 0)
+              data += entry
+
+          with open(outfile, 'wb') as f:
+              f.write(data)
+          print(f"Generated {outfile}: {len(data)//32} partition(s)")
+          PYEOF
+
       - name: Generate manifest JSON
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
