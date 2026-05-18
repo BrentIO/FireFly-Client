@@ -37,6 +37,12 @@
 #define EXCESSIVE_FLASH_ON_MS   100UL
 #define EXCESSIVE_FLASH_OFF_MS  100UL
 
+// LONG press: 100ms full-brightness flash, then hold at half retained (5% floor)
+#define LONG_FLASH_ON_MS           100UL
+#define LONG_HOLD_FLOOR_PCT        5
+
+#define WIFI_RECONNECT_INTERVAL_MS 10000UL
+
 // ─── File paths ───────────────────────────────────────────────────────────────
 
 #define CONFIG_FILE   "/config.json"
@@ -73,6 +79,11 @@ struct LedChannel {
     // EXCESSIVE flash state machine
     uint8_t       excessiveFlashStep;   // 0 = idle; 1–6 = on/off pairs
     unsigned long excessiveFlashAt;     // millis() when next step is due
+
+    // LONG press state machine
+    // longPressPhase: 0 = idle, 1 = flash phase, 2 = hold phase
+    uint8_t       longPressPhase;
+    unsigned long longFlashAt;          // millis() when flash phase ends
 };
 
 struct Config {
@@ -105,6 +116,7 @@ time_t bootTime   = 0;
 unsigned long lastHealthPublish = 0;
 unsigned long lastOtaCheck      = 0;
 unsigned long lastMqttAttempt   = 0;
+unsigned long lastWifiAttempt   = 0;
 unsigned long lastProvScan      = 0;
 
 // Unprovisioned LED rotation state
@@ -128,6 +140,7 @@ void   handleCertBroadcast(const String& payload);
 void   setLedRetained(int idx, int pwmValue);
 int    percentToPwm(int pct);
 void   tickExcessiveFlash(int idx);
+void   tickLongPress(int idx);
 void   rotateLeds();
 void   checkOta();
 String buildTopic(const char* pattern);
@@ -181,7 +194,9 @@ void loop() {
     }
 
     if (WiFi.status() != WL_CONNECTED) {
-        connectWifi();
+        if (millis() - lastWifiAttempt >= WIFI_RECONNECT_INTERVAL_MS) {
+            connectWifi();
+        }
         return;
     }
 
@@ -208,6 +223,9 @@ void loop() {
     for (int i = 0; i < cfg.ledCount; i++) {
         if (cfg.leds[i].excessiveFlashStep > 0) {
             tickExcessiveFlash(i);
+        }
+        if (cfg.leds[i].longPressPhase > 0) {
+            tickLongPress(i);
         }
     }
 }
@@ -327,6 +345,7 @@ bool loadConfig() {
         cfg.leds[i].retainedBrightness = 0;
         cfg.leds[i].savedBrightness = 0;
         cfg.leds[i].excessiveFlashStep = 0;
+        cfg.leds[i].longPressPhase = 0;
     }
 
     // Hids are keyed 1–6 (1-indexed); the key IS the channelNumber in the MQTT topic.
@@ -376,12 +395,9 @@ bool loadCert() {
 // ─── WiFi ─────────────────────────────────────────────────────────────────────
 
 void connectWifi() {
+    lastWifiAttempt = millis();
     WiFi.mode(WIFI_STA);
     WiFi.begin(cfg.wifiSsid.c_str(), cfg.wifiPassword.c_str());
-    unsigned long start = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - start < 30000) {
-        delay(500);
-    }
 }
 
 // ─── MQTT ─────────────────────────────────────────────────────────────────────
@@ -476,6 +492,7 @@ void handleInputState(const String& portId, int channelNumber, const String& sta
 
         if (state == "NORMAL") {
             cfg.leds[i].excessiveFlashStep = 0;
+            cfg.leds[i].longPressPhase     = 0;
             ledWrite(cfg.leds[i].pin, cfg.leds[i].retainedBrightness);
 
         } else if (state == "SHORT") {
@@ -483,9 +500,10 @@ void handleInputState(const String& portId, int channelNumber, const String& sta
             ledWrite(cfg.leds[i].pin, 0);
 
         } else if (state == "LONG") {
-            // Long-press LED behavior is TBD; treating same as SHORT for now
-            cfg.leds[i].savedBrightness = cfg.leds[i].retainedBrightness;
-            ledWrite(cfg.leds[i].pin, 0);
+            cfg.leds[i].savedBrightness  = cfg.leds[i].retainedBrightness;
+            cfg.leds[i].longPressPhase   = 1;
+            cfg.leds[i].longFlashAt      = millis() + LONG_FLASH_ON_MS;
+            ledWrite(cfg.leds[i].pin, LED_PWM_MAX);
 
         } else if (state == "EXCESSIVE") {
             cfg.leds[i].savedBrightness    = cfg.leds[i].retainedBrightness;
@@ -521,6 +539,21 @@ void tickExcessiveFlash(int idx) {
             led.excessiveFlashStep++;
         }
     }
+}
+
+// ─── LED: LONG press state machine ───────────────────────────────────────────
+
+void tickLongPress(int idx) {
+    LedChannel& led = cfg.leds[idx];
+    if (led.longPressPhase != 1) return;
+    if (millis() < led.longFlashAt) return;
+
+    int holdLevel = led.savedBrightness / 2;
+    int floor     = percentToPwm(LONG_HOLD_FLOOR_PCT);
+    if (holdLevel < floor) holdLevel = floor;
+
+    led.longPressPhase = 2;
+    ledWrite(led.pin, holdLevel);
 }
 
 // ─── LED: brightness commands ────────────────────────────────────────────────
