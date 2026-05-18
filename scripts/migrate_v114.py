@@ -185,14 +185,27 @@ def run_discovery(args) -> dict:
 # Phase 2 — Upgrade
 # ---------------------------------------------------------------------------
 
-def run_upgrade(args, data: dict, client: mqtt.Client) -> None:
+def run_upgrade(args, data: dict, client: mqtt.Client | None) -> None:
     """
     Publish firmware URL to each PENDING device and mark it SENT.
+    In dry-run mode, prints what would be sent without publishing anything.
     """
-    print("\n=== Phase 2: Upgrade ===")
+    dry_run = args.dry_run
+    label = " [DRY RUN]" if dry_run else ""
+    print(f"\n=== Phase 2: Upgrade{label} ===")
+
     pending = [d for d in data["devices"] if d["status"] == "PENDING"]
     if not pending:
         print("No PENDING devices to upgrade.")
+        return
+
+    if dry_run:
+        print(f"Would send firmware URL to {len(pending)} device(s):")
+        for dev in pending:
+            topic = f"{TOPIC_ROOT}/{dev['device_id']}/firmware/set"
+            print(f"  [{dev['device_id']}] {dev.get('name', '')} → {topic}")
+            print(f"    payload: {args.firmware_url}")
+        print("\n(Dry run — no messages published. Use --no-dry-run to execute.)")
         return
 
     print(f"Sending firmware URL to {len(pending)} device(s)...")
@@ -370,6 +383,12 @@ def parse_args():
         default=30,
         help="Seconds to wait for retained device messages during discovery",
     )
+    parser.add_argument(
+        "--dry-run",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Preview what would be sent without publishing firmware URLs (default: on; use --no-dry-run to execute)",
+    )
     return parser.parse_args()
 
 
@@ -379,6 +398,9 @@ def parse_args():
 
 def main():
     args = parse_args()
+
+    if args.dry_run:
+        print("*** DRY RUN — no firmware URLs will be published. Pass --no-dry-run to execute. ***")
 
     # Phase 1 — Discovery (uses its own short-lived MQTT connection)
     data = run_discovery(args)
@@ -390,6 +412,12 @@ def main():
             f"\nNo PENDING devices found "
             f"({already_terminal} already at terminal status). Nothing to do."
         )
+        print_summary(data)
+        return
+
+    if args.dry_run:
+        # Show what would be sent, then stop — no MQTT connection needed
+        run_upgrade(args, data, client=None)
         print_summary(data)
         return
 
