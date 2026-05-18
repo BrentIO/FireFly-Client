@@ -15,6 +15,8 @@
 
 // ─── Firmware version ────────────────────────────────────────────────────────
 
+#define APPLICATION_NAME "FireFly Client"
+
 #ifndef VERSION
     #define VERSION "DEBUG"
 #endif
@@ -624,6 +626,18 @@ void publishAutoDiscovery() {
     String uuid  = cfg.uuid;
     String avail = buildTopic(MQTT_AVAILABILITY_TOPIC);
 
+    auto addDevice = [&](JsonDocument& doc) {
+        JsonObject device = doc["device"].to<JsonObject>();
+        JsonArray  ids    = device["identifiers"].to<JsonArray>();
+        ids.add("FireFly-" + uuid);
+        device["name"]          = uuid;
+        device["manufacturer"]  = HARDWARE_MANUFACTURER_NAME;
+        device["model"]         = APPLICATION_NAME;
+        device["model_id"]      = PRODUCT_ID;
+        device["serial_number"] = uuid;
+        device["sw_version"]    = VERSION;
+    };
+
     auto publishSensor = [&](const char* id, const char* name, const char* stateTopic, const char* icon) {
         String discTopic = "homeassistant/sensor/FireFly-" + uuid + "-" + id + "/config";
         JsonDocument doc;
@@ -632,6 +646,7 @@ void publishAutoDiscovery() {
         doc["state_topic"]        = stateTopic;
         doc["availability_topic"] = avail;
         if (icon) doc["icon"]     = icon;
+        addDevice(doc);
         String payload;
         serializeJson(doc, payload);
         mqttClient.publish(discTopic.c_str(), payload.c_str(), true);
@@ -653,6 +668,7 @@ void publishAutoDiscovery() {
         doc["command_topic"]      = buildTopic(MQTT_UPDATE_SET_TOPIC);
         doc["payload_install"]    = "do-update";
         doc["availability_topic"] = avail;
+        addDevice(doc);
         String payload;
         serializeJson(doc, payload);
         mqttClient.publish(discTopic.c_str(), payload.c_str(), true);
