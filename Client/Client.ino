@@ -345,6 +345,9 @@ bool loadConfig() {
         cfg.leds[i].longPressPhase = 0;
     }
 
+    // id is a root-level field shared by all HIDs on this client (same port on the controller).
+    String portId = doc["id"].as<String>();
+
     // Hids are keyed 1–6 (1-indexed); the key IS the channelNumber in the MQTT topic.
     // Iterate by explicit key so HID numbering is stable regardless of inversion or count.
     cfg.ledCount = 0;
@@ -352,7 +355,6 @@ bool loadConfig() {
     for (int ch = 1; ch <= LED_CHANNEL_COUNT; ch++) {
         JsonObject hid = hids[String(ch)];
         if (hid.isNull()) continue;
-        String portId = hid["id"].as<String>();
         if (portId.length() == 0) continue;
         int idx = ch - 1;  // 0-based index into LED_PINS[]
         cfg.leds[idx].portId             = portId;
