@@ -164,6 +164,12 @@ void setup() {
     }
 
     if (!LittleFS.begin()) {
+        // Mount failed — likely an incompatible filesystem format (e.g. SPIFFS from v1.14).
+        // Format and remount so saveConfig() can write during provisioning.
+        // Only done here: the path below where begin() succeeds but config is absent
+        // must never format — the filesystem is healthy in that case.
+        LittleFS.format();
+        LittleFS.begin();
         runProvisioningMode();
         return;
     }
