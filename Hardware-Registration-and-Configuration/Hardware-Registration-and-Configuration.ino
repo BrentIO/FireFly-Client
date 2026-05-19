@@ -21,9 +21,10 @@
 
 #include "common/hardware.h"
 
-#define HW_REG_APPLICATION     "Hardware-Registration-and-Configuration"
-#define DEVICE_CLASS           "CLIENT"
-#define FIREFLY_CLOUD_API_ROOT "https://api.fireflylx.com"
+#include "common/cloudConfig.h"
+
+#define HW_REG_APPLICATION "Hardware-Registration-and-Configuration"
+#define DEVICE_CLASS       "CLIENT"
 
 #ifndef VERSION
     #define VERSION "DEBUG"
