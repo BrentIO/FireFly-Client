@@ -62,9 +62,10 @@
 #define MQTT_UPDATE_SET_TOPIC      "FireFly/%s/update/set"
 #define MQTT_INPUT_STATE_TOPIC     "FireFly/inputs/%s/channels/%d/state"
 #define MQTT_LED_BRIGHTNESS_TOPIC  "FireFly/%s/leds/brightness/set"
-#define MQTT_CERT_STATE_TOPIC      "FireFly/%s/cert/state"
-#define MQTT_CERT_BROADCAST_TOPIC  "FireFly/clients/cert/state"
-#define MQTT_TAG_SET_TOPIC         "FireFly/tag/%s/set"
+#define MQTT_CERT_STATE_TOPIC             "FireFly/%s/cert/state"
+#define MQTT_CERT_BROADCAST_TOPIC         "FireFly/clients/cert/state"
+#define MQTT_TAG_SET_TOPIC                "FireFly/tag/%s/set"
+#define MQTT_CLIENTS_BRIGHTNESS_TOPIC     "FireFly/clients/leds/brightness/set"
 
 // ─── Data structures ──────────────────────────────────────────────────────────
 
@@ -581,6 +582,7 @@ void connectMqtt() {
     }
 
     mqttClient.subscribe(buildTopic(MQTT_LED_BRIGHTNESS_TOPIC).c_str());
+    mqttClient.subscribe(MQTT_CLIENTS_BRIGHTNESS_TOPIC);
     mqttClient.subscribe(buildTopic(MQTT_UPDATE_SET_TOPIC).c_str());
     mqttClient.subscribe(MQTT_CERT_BROADCAST_TOPIC);
 
@@ -629,7 +631,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         return;
     }
 
-    if (t == buildTopic(MQTT_LED_BRIGHTNESS_TOPIC)) {
+    if (t == buildTopic(MQTT_LED_BRIGHTNESS_TOPIC) || t == MQTT_CLIENTS_BRIGHTNESS_TOPIC) {
         handleBrightnessCommand(p);
         return;
     }
