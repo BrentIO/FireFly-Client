@@ -208,6 +208,25 @@ channels:
         $ref: "#/components/messages/ledBrightnessSet"
 
   ##########################################################
+  ## Tag LED animation control (subscribed)               ##
+  ##########################################################
+
+  tagSet:
+    address: "FireFly/tag/{tagName}/set"
+    description: >
+      Command topic for tag-driven LED animations. The client subscribes to one topic per
+      unique tag found across all of its configured HID channels at MQTT connect. When a
+      message is received, the commanded animation state is applied to every HID channel
+      that carries that tag. Last-received command wins. Tag state persists across MQTT
+      reconnects — the client re-subscribes on reconnect and resumes the last animation.
+    parameters:
+      tagName:
+        $ref: "#/components/parameters/tagName"
+    messages:
+      tagSet:
+        $ref: "#/components/messages/tagSet"
+
+  ##########################################################
   ## Certificate rotation broadcast (subscribed)          ##
   ##########################################################
 
@@ -385,6 +404,20 @@ operations:
     messages:
       - $ref: "#/channels/updateSet/messages/updateSet"
 
+  receiveTagSet:
+    action: receive
+    channel:
+      $ref: "#/channels/tagSet"
+    summary: Receive tag LED animation command
+    description: >
+      The client subscribes to one topic per unique tag across all of its configured HID
+      channels. On receipt, the commanded animation state is applied to every channel that
+      carries the tag. A button press on an animating LED still follows normal button-state
+      LED behavior; on button release (NORMAL) the tag animation resumes. Last-received
+      command wins when multiple tag topics fire on the same channel.
+    messages:
+      - $ref: "#/channels/tagSet/messages/tagSet"
+
   receiveClientCertBroadcast:
     action: receive
     channel:
@@ -455,6 +488,15 @@ components:
         - time-start
         - count-errors
         - cert
+
+    tagName:
+      description: >
+        Tag label assigned to one or more HID channels in the client configuration.
+        Tags are arbitrary strings (1–20 characters). A client subscribes to one topic
+        per unique tag across all of its configured HID channels.
+      examples:
+        - Security
+        - Holiday
 
     haRoot:
       description: >
@@ -618,6 +660,25 @@ components:
         - name: off
           payload: "0"
 
+    tagSet:
+      name: tagSet
+      title: Tag LED Animation Command
+      summary: Command to apply a named LED animation state to all HID channels carrying the tag
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/tagSetPayload"
+      examples:
+        - name: blink
+          payload:
+            state: blink
+            brightness: 75
+        - name: snore
+          payload:
+            state: snore
+        - name: normal
+          payload:
+            state: normal
+
     clientCertBroadcast:
       name: clientCertBroadcast
       title: CA Certificate Rotation Broadcast
@@ -759,6 +820,40 @@ components:
         - "0"
         - "50"
         - "100"
+
+    tagSetPayload:
+      type: object
+      description: >
+        Tag LED animation command payload. Applies the named animation state to every HID
+        channel on this client that carries the matching tag.
+      required:
+        - state
+      properties:
+        state:
+          type: string
+          enum:
+            - snore
+            - blink
+            - blink-rapid
+            - normal
+          description: >
+            Animation to apply.
+            snore = smooth PWM fade up then down continuously (~6 s full cycle at full brightness).
+            blink = hard on/off toggle at 750 ms intervals.
+            blink-rapid = hard on/off toggle at 375 ms intervals.
+            normal = cancel tag animation and restore the channel's defaultBrightness.
+        brightness:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: >
+            LED brightness percentage to use during the animation (0–100). Ignored when state
+            is normal. If omitted, the channel's defaultBrightness from config is used.
+      examples:
+        - state: blink
+          brightness: 75
+        - state: snore
+        - state: normal
 
     clientCertBroadcastPayload:
       type: object
