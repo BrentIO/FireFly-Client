@@ -1,0 +1,601 @@
+openapi: 3.0.3
+info:
+  title: FireFly Hardware Registration and Configuration
+  description: Retrieve and set data required for hardware registration of a FireFly Client device
+  version: "9999.99.99"
+servers:
+  - url: http://{domain}
+    variables:
+      domain:
+        default: 192.168.4.1
+        description: IP address of the device's SoftAP interface
+tags:
+  - name: Device Identity
+    description: Operations for managing the device identity data stored in EEPROM
+  - name: Cloud Registration
+    description: Operations for managing device registration with FireFly-Cloud
+  - name: Network
+    description: Operations for network interfaces and WiFi uplink
+  - name: Peripherals
+    description: Operations for the on-board peripherals
+  - name: MCU
+    description: Operations for the main control unit
+  - name: Version
+    description: Operations for the hardware and firmware versions
+  - name: Event and Error Logs
+    description: Operations for the event and error logs
+paths:
+  /api/identity:
+    post:
+      tags:
+        - Device Identity
+      summary: Store the device identity
+      description: >
+        Writes the device identity (UUID, product_id, product_hex) to EEPROM.
+        The master key is generated on-device via hardware RNG and is never returned.
+        Returns 409 if identity is already provisioned (one-write semantics).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identityConfig'
+      responses:
+        '201':
+          description: Device identity written successfully
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error_message'
+              examples:
+                invalidUuid:
+                  value: {error: invalid uuid}
+                invalidProductId:
+                  value: {error: invalid product_id}
+                productHexMismatch:
+                  value: {error: product_hex mismatch}
+        '409':
+          description: Conflict — device identity already provisioned in EEPROM
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error_message'
+              example:
+                error: already provisioned
+        '500':
+          description: Internal Server Error — EEPROM write failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error_message'
+              example:
+                error: write failed
+    get:
+      tags:
+        - Device Identity
+      summary: Retrieve the device identity
+      description: >
+        Returns the device identity currently stored in EEPROM.
+        The master key is never included in the response.
+        Returns 404 if no identity has been provisioned.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identityConfig'
+              example:
+                uuid: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                product_id: FFI0600-2011
+                product_hex: '0x06002011'
+        '404':
+          description: No device identity configured
+
+  /api/registration:
+    get:
+      tags:
+        - Cloud Registration
+      summary: Retrieve cloud registration status
+      description: >
+        Returns the in-RAM registration state. Returns 409 if device identity
+        is not provisioned.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/registrationStatus'
+              example:
+                registered: true
+                checked_at: 1714000000
+        '409':
+          description: Conflict — device identity not provisioned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error_message'
+              example:
+                error: not provisioned
+    post:
+      tags:
+        - Cloud Registration
+      summary: Register device with FireFly-Cloud
+      description: >
+        Derives the ECDSA P-256 public key from the EEPROM master key via HKDF-SHA-256
+        and registers the device with FireFly-Cloud. Requires a one-time Registration Key
+        obtained from FireFly-Cloud and an active internet connection (POST /api/network/wifi
+        first). Send Content-Type: application/json with an empty body {} or optionally
+        include a url field to override the default cloud URL.
+      parameters:
+        - in: header
+          name: X-Registration-Key
+          required: true
+          schema:
+            type: string
+            minLength: 6
+            maxLength: 6
+          description: One-time 6-character registration key obtained from FireFly-Cloud
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/registrationRequest'
+      responses:
+        '204':
+          description: Device registered successfully with FireFly-Cloud
+        '400':
+          description: Bad Request — X-Registration-Key header missing or not 6 characters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error_message'
+              example:
+                error: X-Registration-Key header is required and must be 6 characters
+        '403':
+          description: Forbidden — registration key is invalid or expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error_message'
+              example:
+                error: invalid or expired registration key
+        '409':
+          description: Conflict — device identity not provisioned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error_message'
+              example:
+                error: not provisioned
+        '500':
+          description: Internal Server Error — key derivation or EC computation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error_message'
+              example:
+                error: key computation failed
+        '502':
+          description: Bad Gateway — FireFly-Cloud request failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error_message'
+              example:
+                error: cloud registration failed
+        '503':
+          description: Service Unavailable — no internet connection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error_message'
+              example:
+                error: no internet — POST /api/network/wifi first
+
+  /api/network/wifi:
+    post:
+      tags:
+        - Network
+      summary: Connect to a WiFi network for cloud access
+      description: >
+        Switches the device from SoftAP-only to AP+STA mode, connects to the specified
+        WiFi network (keeping the SoftAP alive), and syncs NTP. WiFi credentials are
+        never persisted. Required before POST /api/registration.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/wifiCredentials'
+      responses:
+        '200':
+          description: Connected and NTP synced
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ip:
+                    type: string
+                    description: IPv4 address assigned to the STA interface
+                    example: 192.168.1.150
+        '400':
+          description: Bad Request — ssid field missing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error_message'
+              example:
+                error: ssid required
+        '503':
+          description: Service Unavailable — could not connect to WiFi within 15 seconds
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error_message'
+              example:
+                error: connection failed
+
+  /api/network:
+    get:
+      tags:
+        - Network
+      summary: Retrieve all network interfaces
+      description: >
+        Returns all active network interfaces. Always includes the wifi_ap interface.
+        Includes the wifi (STA) interface if currently connected.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/listNetworkInterface'
+              examples:
+                apOnly:
+                  summary: AP-only (no uplink connected)
+                  value:
+                    - interface: wifi_ap
+                      mac_address: "AA:BB:CC:DD:EE:FF"
+                      ip: 192.168.4.1
+                apAndSta:
+                  summary: AP + STA connected
+                  value:
+                    - interface: wifi_ap
+                      mac_address: "AA:BB:CC:DD:EE:FF"
+                      ip: 192.168.4.1
+                    - interface: wifi
+                      mac_address: "AA:BB:CC:DD:EE:FE"
+                      ip: 192.168.1.150
+
+  /api/version:
+    get:
+      tags:
+        - Version
+      summary: Hardware and firmware version information
+      description: Returns the application name and the product hex code
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/versionInfo'
+              example:
+                application: Hardware-Registration-and-Configuration
+                product_hex: '0x06002011'
+
+  /api/mcu:
+    get:
+      tags:
+        - MCU
+      summary: Main control unit hardware information
+      description: Returns ESP8266 chip, flash, and memory statistics
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/mcuInfo'
+
+  /api/mcu/reboot:
+    post:
+      tags:
+        - MCU
+      summary: Reboot the main control unit
+      description: Triggers a software reset approximately 500 ms after the response is sent
+      responses:
+        '204':
+          description: Accepted — device will reboot shortly
+
+  /api/peripherals:
+    get:
+      tags:
+        - Peripherals
+      summary: On-board peripheral information
+      description: Returns the EEPROM peripheral status
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/listPeripherals'
+              example:
+                - address: '0x00'
+                  type: EEPROM
+                  online: true
+
+  /api/events:
+    get:
+      tags:
+        - Event and Error Logs
+      summary: Event log
+      description: Returns up to the last 20 events in chronological order
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/logEntries'
+              examples:
+                entries:
+                  value:
+                    - timestamp: 12345
+                      message: HW-Reg started
+                empty:
+                  value: []
+
+  /api/errors:
+    get:
+      tags:
+        - Event and Error Logs
+      summary: Error log
+      description: Returns up to the last 20 errors in chronological order
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/logEntries'
+              examples:
+                entries:
+                  value:
+                    - timestamp: 98765
+                      message: WiFi STA connect failed
+                empty:
+                  value: []
+
+components:
+  schemas:
+    error_message:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Message describing the error condition
+          example: Unexpected error
+
+    identityConfig:
+      type: object
+      required:
+        - uuid
+        - product_id
+        - product_hex
+      properties:
+        uuid:
+          type: string
+          description: RFC 4122 UUID uniquely identifying this device
+          format: uuid
+          minLength: 36
+          maxLength: 36
+          example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        product_id:
+          type: string
+          description: Device product ID including board revision code
+          example: FFI0600-2011
+          maxLength: 32
+        product_hex:
+          type: string
+          description: Device product hexadecimal identifier
+          example: '0x06002011'
+          pattern: '^0x[0-9A-Fa-f]{8}$'
+
+    registrationStatus:
+      type: object
+      properties:
+        registered:
+          type: boolean
+          description: Whether the device has been successfully registered with FireFly-Cloud
+          example: false
+        checked_at:
+          type: integer
+          description: Unix epoch timestamp of the last registration attempt. 0 if never attempted
+          example: 0
+
+    registrationRequest:
+      type: object
+      properties:
+        url:
+          type: string
+          description: FireFly-Cloud base URL override. Defaults to https://api.fireflylx.com if omitted
+          example: https://api.fireflylx.com
+
+    wifiCredentials:
+      type: object
+      required:
+        - ssid
+        - password
+      properties:
+        ssid:
+          type: string
+          description: WiFi network SSID
+          example: MyNetwork
+        password:
+          type: string
+          description: WiFi network password
+          example: s3cr3t
+
+    networkInterfaceType:
+      type: string
+      enum:
+        - wifi
+        - wifi_ap
+
+    networkInterface:
+      type: object
+      properties:
+        interface:
+          $ref: '#/components/schemas/networkInterfaceType'
+        mac_address:
+          type: string
+          description: Hardware MAC address
+          pattern: '^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$'
+          example: AA:BB:CC:DD:EE:FF
+        ip:
+          type: string
+          description: IPv4 address assigned to this interface
+          example: 192.168.4.1
+
+    listNetworkInterface:
+      type: array
+      items:
+        $ref: '#/components/schemas/networkInterface'
+
+    versionInfo:
+      type: object
+      properties:
+        application:
+          type: string
+          description: Application name
+          example: Hardware-Registration-and-Configuration
+        product_hex:
+          type: string
+          description: Product hex code as a 0x-prefixed string
+          example: '0x06002011'
+
+    mcuInfo:
+      type: object
+      properties:
+        chip_model:
+          type: string
+          description: Chip model (always "ESP8266" for this hardware)
+          example: ESP8266
+        chip_id:
+          type: string
+          description: Chip ID derived from the last 3 bytes of the WiFi MAC address
+          example: '0x1A2B3C'
+        chip_cores:
+          type: integer
+          description: Number of CPU cores (always 1 for ESP8266)
+          example: 1
+        sdk_version:
+          type: string
+          description: ESP8266 NonOS SDK version string
+          example: 2.2.2-dev(38a443e)
+        cpu_freq_mhz:
+          type: integer
+          description: CPU frequency in MHz
+          example: 80
+        flash_chip_size:
+          type: integer
+          description: Flash chip size in bytes
+          example: 4194304
+        flash_chip_speed:
+          type: integer
+          description: Flash chip speed in MHz
+          example: 40
+        flash_chip_mode:
+          type: string
+          description: Flash chip mode
+          enum:
+            - QIO
+            - QOUT
+            - DIO
+            - DOUT
+            - UNKNOWN
+          example: DIO
+        flash_chip_id:
+          type: string
+          description: Flash chip manufacturer ID
+          example: '0x001640EF'
+        free_heap:
+          type: integer
+          description: Free heap memory in bytes
+          example: 32768
+        max_free_block_size:
+          type: integer
+          description: Largest contiguous free heap block in bytes
+          example: 28672
+        heap_fragmentation:
+          type: integer
+          description: Heap fragmentation percentage (0–100)
+          example: 12
+        sketch_size:
+          type: integer
+          description: Compiled sketch size in bytes
+          example: 360448
+        free_sketch_space:
+          type: integer
+          description: Remaining flash space for OTA in bytes
+          example: 671744
+        reset_reason:
+          type: string
+          description: Reason for the last reset
+          example: External System
+        boot_time:
+          type: integer
+          description: >
+            Unix epoch timestamp of device boot if NTP is synced;
+            otherwise seconds elapsed since boot
+          example: 1714000000
+
+    peripheralType:
+      type: string
+      description: Type of peripheral
+      enum:
+        - EEPROM
+
+    peripheral:
+      type: object
+      properties:
+        address:
+          type: string
+          description: Hexadecimal address of the peripheral
+          example: '0x00'
+        type:
+          $ref: '#/components/schemas/peripheralType'
+        online:
+          type: boolean
+          description: Whether the peripheral was detected online at boot
+          example: true
+
+    listPeripherals:
+      type: array
+      items:
+        $ref: '#/components/schemas/peripheral'
+
+    logEntry:
+      type: object
+      properties:
+        timestamp:
+          type: integer
+          description: Milliseconds since boot when this entry was logged
+          example: 12345
+        message:
+          type: string
+          description: Log message text
+          example: HW-Reg started
+
+    logEntries:
+      type: array
+      items:
+        $ref: '#/components/schemas/logEntry'

@@ -26,18 +26,20 @@ jobs:
               include: [
                 .devices[]
                 | select(.status == "ACTIVE")
+                | . as $dev
+                | ["Client", "Hardware-Registration-and-Configuration"][]
                 | {
-                    application: "Client",
-                    product_hex: .product_hex,
-                    product_id: .product_id,
+                    application: .,
+                    product_hex: $dev.product_hex,
+                    product_id: $dev.product_id,
                     fqbn: (
-                      .board_fqbn + ":" + (
-                        .board_options | to_entries | map(.key + "=" + .value) | join(",")
+                      $dev.board_fqbn + ":" + (
+                        $dev.board_options | to_entries | map(.key + "=" + .value) | join(",")
                       )
                     ),
-                    bootloader_addr: .bootloader_addr,
+                    bootloader_addr: $dev.bootloader_addr,
                     partition_size_app: (
-                      .partition_scheme[]
+                      $dev.partition_scheme[]
                       | select(.label == "app0")
                       | .size
                     )
