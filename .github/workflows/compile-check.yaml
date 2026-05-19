@@ -74,19 +74,33 @@ jobs:
           fi
           DOMAIN=$(echo "$FIREFLY_CLOUD_API_ROOT" | sed 's|https\?://||' | cut -d/ -f1)
           echo | openssl s_client -connect "${DOMAIN}:443" -servername "${DOMAIN}" -showcerts 2>/dev/null > /tmp/chain.pem
+          if [ ! -s /tmp/chain.pem ]; then
+            echo "❌ Failed to connect to ${DOMAIN}:443"
+            exit 1
+          fi
           python3 - <<'PYEOF'
-          import re
+          import re, sys
           from cryptography import x509
           data = open('/tmp/chain.pem', 'rb').read()
           pem_blocks = re.findall(b'-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----', data, re.DOTALL)
+          if not pem_blocks:
+              print('❌ No certificate blocks found in chain output', file=sys.stderr)
+              sys.exit(1)
+          chosen = None
           for pem in pem_blocks:
               cert = x509.load_pem_x509_certificate(pem)
               if cert.issuer == cert.subject:
-                  open('/tmp/cloud_cert.pem', 'wb').write(pem + b'\n')
+                  chosen = pem
+                  print(f'Using self-signed root CA: {cert.subject.rfc4514_string()}')
                   break
+          if chosen is None:
+              chosen = pem_blocks[-1]
+              cert = x509.load_pem_x509_certificate(chosen)
+              print(f'No self-signed root in chain; using last cert: {cert.subject.rfc4514_string()}')
+          open('/tmp/cloud_cert.pem', 'wb').write(chosen + b'\n')
           PYEOF
           if [ ! -s /tmp/cloud_cert.pem ]; then
-            echo "❌ Failed to fetch root CA cert for ${DOMAIN}"
+            echo "❌ Failed to extract cert for ${DOMAIN}"
             exit 1
           fi
           python3 - <<'PYEOF'
