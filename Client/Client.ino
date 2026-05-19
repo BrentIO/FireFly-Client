@@ -465,7 +465,7 @@ static void parseCertMetadata(const String& pem) {
     dn.len = 0;
 
     br_x509_decoder_context x509;
-    br_x509_decoder_init(&x509, dnAppend, &dn);
+    br_x509_decoder_init(&x509, dnAppend, &dn, nullptr, nullptr);
     br_x509_decoder_push(&x509, der.data, der.len);
 
     uint32_t days    = x509.notafter_days;
@@ -923,4 +923,5 @@ void handleCertBroadcast(const String& payload) {
     parseCertMetadata(certPem);
 
     mqttClient.publish(buildTopic(MQTT_CERT_STATE_TOPIC).c_str(), certFingerprint.c_str(), true);
+    publishAutoDiscovery();
 }
