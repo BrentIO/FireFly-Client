@@ -207,6 +207,19 @@ channels:
       ledBrightnessSet:
         $ref: "#/components/messages/ledBrightnessSet"
 
+  clientsBrightnessSet:
+    address: "FireFly/clients/leds/brightness/set"
+    description: >
+      Broadcast command topic to set the brightness level of all configured LEDs on every
+      connected client simultaneously. The client subscribes to this topic at MQTT connect.
+      The payload is a numeric brightness percentage (0–100) which is applied to all configured
+      LED channels and stored as the retained brightness so subsequent button events restore
+      to the commanded level. Differs from ledBrightnessSet in that it targets all clients
+      rather than a single device.
+    messages:
+      clientsBrightnessSet:
+        $ref: "#/components/messages/ledBrightnessSet"
+
   ##########################################################
   ## Tag LED animation control (subscribed)               ##
   ##########################################################
@@ -382,7 +395,7 @@ operations:
     action: receive
     channel:
       $ref: "#/channels/ledBrightnessSet"
-    summary: Receive LED brightness command
+    summary: Receive per-device LED brightness command
     description: >
       The client subscribes to this topic on MQTT connect. The payload is a numeric brightness
       percentage (0–100) applied immediately to all configured LEDs. The value is persisted as
@@ -390,6 +403,19 @@ operations:
       than a hardcoded default.
     messages:
       - $ref: "#/channels/ledBrightnessSet/messages/ledBrightnessSet"
+
+  receiveClientsBrightnessSet:
+    action: receive
+    channel:
+      $ref: "#/channels/clientsBrightnessSet"
+    summary: Receive all-clients LED brightness broadcast
+    description: >
+      The client subscribes to this topic on MQTT connect. Identical behavior to
+      receiveLedBrightnessSet but targets every connected client simultaneously rather than
+      a single device. The payload is a numeric brightness percentage (0–100) applied
+      immediately to all configured LEDs and persisted as the retained brightness.
+    messages:
+      - $ref: "#/channels/clientsBrightnessSet/messages/clientsBrightnessSet"
 
   receiveUpdateSet:
     action: receive
