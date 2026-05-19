@@ -64,3 +64,10 @@ jobs:
             -b "${{ env.FQBN }}" ./Client \
             --warnings more --clean \
             --build-property "build.extra_flags=-DPRODUCT_HEX=${{ env.PRODUCT_HEX }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -I${{ github.workspace }}"
+
+      - name: Compile Hardware-Registration-and-Configuration
+        run: |
+          arduino-cli compile \
+            -b "${{ env.FQBN }}" ./Hardware-Registration-and-Configuration \
+            --warnings more --clean \
+            --build-property "build.extra_flags=-DPRODUCT_HEX=${{ env.PRODUCT_HEX }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -I${{ github.workspace }}"
