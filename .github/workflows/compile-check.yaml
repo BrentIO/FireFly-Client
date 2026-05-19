@@ -73,20 +73,20 @@ jobs:
             exit 1
           fi
           DOMAIN=$(echo "$FIREFLY_CLOUD_API_ROOT" | sed 's|https\?://||' | cut -d/ -f1)
-          echo | openssl s_client -connect "${DOMAIN}:443" -servername "${DOMAIN}" -showcerts 2>/dev/null \
-            | python3 -c "
-import sys, re
-from cryptography import x509
-data = sys.stdin.buffer.read()
-pem_blocks = re.findall(b'-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----', data, re.DOTALL)
-for pem in pem_blocks:
-    cert = x509.load_pem_x509_certificate(pem)
-    if cert.issuer == cert.subject:
-        sys.stdout.buffer.write(pem + b'\n')
-        break
-" > /tmp/cloud_cert.pem
+          echo | openssl s_client -connect "${DOMAIN}:443" -servername "${DOMAIN}" -showcerts 2>/dev/null > /tmp/chain.pem
+          python3 - <<'PYEOF'
+          import re
+          from cryptography import x509
+          data = open('/tmp/chain.pem', 'rb').read()
+          pem_blocks = re.findall(b'-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----', data, re.DOTALL)
+          for pem in pem_blocks:
+              cert = x509.load_pem_x509_certificate(pem)
+              if cert.issuer == cert.subject:
+                  open('/tmp/cloud_cert.pem', 'wb').write(pem + b'\n')
+                  break
+          PYEOF
           if [ ! -s /tmp/cloud_cert.pem ]; then
-            echo "❌ Failed to fetch TLS cert for ${DOMAIN}"
+            echo "❌ Failed to fetch root CA cert for ${DOMAIN}"
             exit 1
           fi
           python3 - <<'PYEOF'
