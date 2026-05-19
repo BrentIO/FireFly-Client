@@ -11,7 +11,7 @@ concurrency:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  FIREFLY_CLOUD_API_ROOT: "https://api.fireflylx.com"
+  FIREFLY_CLOUD_API_ROOT: ${{ vars.FIREFLY_CLOUD_API_ROOT }}
 
 jobs:
   compile:
@@ -68,6 +68,10 @@ jobs:
 
       - name: Fetch TLS certificate for FIREFLY_CLOUD_API_ROOT
         run: |
+          if [ -z "$FIREFLY_CLOUD_API_ROOT" ]; then
+            echo "❌ FIREFLY_CLOUD_API_ROOT variable is not set"
+            exit 1
+          fi
           DOMAIN=$(echo "$FIREFLY_CLOUD_API_ROOT" | sed 's|https\?://||' | cut -d/ -f1)
           echo | openssl s_client -connect "${DOMAIN}:443" -servername "${DOMAIN}" 2>/dev/null \
             | openssl x509 > /tmp/cloud_cert.pem
