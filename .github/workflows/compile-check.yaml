@@ -11,6 +11,7 @@ concurrency:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  FIREFLY_CLOUD_API_ROOT: ${{ vars.FIREFLY_CLOUD_API_ROOT }}
 
 jobs:
   compile:
@@ -65,9 +66,33 @@ jobs:
             --warnings more --clean \
             --build-property "build.extra_flags=-DPRODUCT_HEX=${{ env.PRODUCT_HEX }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -I${{ github.workspace }}"
 
+      - name: Fetch TLS certificate for FIREFLY_CLOUD_API_ROOT
+        run: |
+          if [ -z "$FIREFLY_CLOUD_API_ROOT" ]; then
+            echo "❌ FIREFLY_CLOUD_API_ROOT variable is not set"
+            exit 1
+          fi
+          DOMAIN=$(echo "$FIREFLY_CLOUD_API_ROOT" | sed 's|https\?://||' | cut -d/ -f1)
+          echo | openssl s_client -connect "${DOMAIN}:443" -servername "${DOMAIN}" 2>/dev/null \
+            | openssl x509 > /tmp/cloud_cert.pem
+          if [ ! -s /tmp/cloud_cert.pem ]; then
+            echo "❌ Failed to fetch TLS cert for ${DOMAIN}"
+            exit 1
+          fi
+          python3 - <<'PYEOF'
+          import os
+          lines = open('/tmp/cloud_cert.pem').read().strip().split('\n')
+          with open('common/cloudCert.h', 'w') as f:
+              f.write('#pragma once\n')
+              f.write('static const char FIREFLY_CLOUD_CERT_PEM[] =\n')
+              for line in lines:
+                  f.write(f'    "{line}\\n"\n')
+              f.write('    ;\n')
+          PYEOF
+
       - name: Compile Hardware-Registration-and-Configuration
         run: |
           arduino-cli compile \
             -b "${{ env.FQBN }}" ./Hardware-Registration-and-Configuration \
             --warnings more --clean \
-            --build-property "build.extra_flags=-DPRODUCT_HEX=${{ env.PRODUCT_HEX }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -I${{ github.workspace }}"
+            --build-property "build.extra_flags=-DPRODUCT_HEX=${{ env.PRODUCT_HEX }} -DFIREFLY_CLOUD_API_ROOT=\"${{ env.FIREFLY_CLOUD_API_ROOT }}\" -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -I${{ github.workspace }}"

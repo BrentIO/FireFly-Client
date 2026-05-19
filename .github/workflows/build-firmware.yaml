@@ -124,7 +124,36 @@ jobs:
       - name: Create Output Directory
         run: mkdir -p "${{ env.ARTIFACT_ROOT }}/${{ matrix.product_id }}/${{ matrix.application }}/${{ env.BRANCH }}-${{ env.COMMIT_HASH }}"
 
+      - name: Fetch TLS certificate for FIREFLY_CLOUD_API_ROOT
+        if: matrix.application == 'Hardware-Registration-and-Configuration'
+        env:
+          FIREFLY_CLOUD_API_ROOT: ${{ vars.FIREFLY_CLOUD_API_ROOT }}
+        run: |
+          if [ -z "$FIREFLY_CLOUD_API_ROOT" ]; then
+            echo "❌ FIREFLY_CLOUD_API_ROOT variable is not set"
+            exit 1
+          fi
+          DOMAIN=$(echo "$FIREFLY_CLOUD_API_ROOT" | sed 's|https\?://||' | cut -d/ -f1)
+          echo | openssl s_client -connect "${DOMAIN}:443" -servername "${DOMAIN}" 2>/dev/null \
+            | openssl x509 > /tmp/cloud_cert.pem
+          if [ ! -s /tmp/cloud_cert.pem ]; then
+            echo "❌ Failed to fetch TLS cert for ${DOMAIN}"
+            exit 1
+          fi
+          python3 - <<'PYEOF'
+          import os
+          lines = open('/tmp/cloud_cert.pem').read().strip().split('\n')
+          with open('common/cloudCert.h', 'w') as f:
+              f.write('#pragma once\n')
+              f.write('static const char FIREFLY_CLOUD_CERT_PEM[] =\n')
+              for line in lines:
+                  f.write(f'    "{line}\\n"\n')
+              f.write('    ;\n')
+          PYEOF
+
       - name: Compile ${{ matrix.application }} (${{ matrix.product_id }})
+        env:
+          FIREFLY_CLOUD_API_ROOT: ${{ vars.FIREFLY_CLOUD_API_ROOT }}
         run: |
           set -e
 
@@ -136,18 +165,34 @@ jobs:
 
           if [ "$VERSION" = "DEBUG" ]; then
             echo "Building DEBUG firmware ($BRANCH)"
-            arduino-cli compile \
-              -b "${{ matrix.fqbn }}" ./${APPLICATION} \
-              --warnings more --clean \
-              --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -I${{ github.workspace }}" \
-              --output-dir "$OUTDIR"
+            if [ "$APPLICATION" = "Hardware-Registration-and-Configuration" ]; then
+              arduino-cli compile \
+                -b "${{ matrix.fqbn }}" ./${APPLICATION} \
+                --warnings more --clean \
+                --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DFIREFLY_CLOUD_API_ROOT=\"${FIREFLY_CLOUD_API_ROOT}\" -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -I${{ github.workspace }}" \
+                --output-dir "$OUTDIR"
+            else
+              arduino-cli compile \
+                -b "${{ matrix.fqbn }}" ./${APPLICATION} \
+                --warnings more --clean \
+                --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -I${{ github.workspace }}" \
+                --output-dir "$OUTDIR"
+            fi
           else
             echo "Building RELEASE firmware ($VERSION)"
-            arduino-cli compile \
-              -b "${{ matrix.fqbn }}" ./${APPLICATION} \
-              --warnings more --clean \
-              --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=0 -DVERSION=\"${VERSION}\" -DCOMMIT_HASH=\"${COMMIT_HASH}\" -I${{ github.workspace }}" \
-              --output-dir "$OUTDIR"
+            if [ "$APPLICATION" = "Hardware-Registration-and-Configuration" ]; then
+              arduino-cli compile \
+                -b "${{ matrix.fqbn }}" ./${APPLICATION} \
+                --warnings more --clean \
+                --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DFIREFLY_CLOUD_API_ROOT=\"${FIREFLY_CLOUD_API_ROOT}\" -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=0 -DVERSION=\"${VERSION}\" -DCOMMIT_HASH=\"${COMMIT_HASH}\" -I${{ github.workspace }}" \
+                --output-dir "$OUTDIR"
+            else
+              arduino-cli compile \
+                -b "${{ matrix.fqbn }}" ./${APPLICATION} \
+                --warnings more --clean \
+                --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=0 -DVERSION=\"${VERSION}\" -DCOMMIT_HASH=\"${COMMIT_HASH}\" -I${{ github.workspace }}" \
+                --output-dir "$OUTDIR"
+            fi
           fi
 
       - name: Generate synthetic ESP8266 partition table

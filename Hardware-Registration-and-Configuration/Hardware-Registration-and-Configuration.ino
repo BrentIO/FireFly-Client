@@ -21,7 +21,15 @@
 
 #include "common/hardware.h"
 
-#include "common/cloudConfig.h"
+#ifndef FIREFLY_CLOUD_API_ROOT
+    #error "FIREFLY_CLOUD_API_ROOT must be defined via build flags"
+#endif
+
+#ifdef __has_include
+#  if __has_include("common/cloudCert.h")
+#    include "common/cloudCert.h"
+#  endif
+#endif
 
 #define HW_REG_APPLICATION "Hardware-Registration-and-Configuration"
 #define DEVICE_CLASS       "CLIENT"
@@ -297,9 +305,13 @@ static void handlePostRegistration(AsyncWebServerRequest* req, JsonVariant& body
     serializeJson(payload, payloadStr);
 
     // POST to FireFly-Cloud
-    // TODO: replace setInsecure() with pre-baked CA cert per FireFly-Docs#233
     WiFiClientSecure sslClient;
+#ifdef FIREFLY_CLOUD_CERT_PEM
+    static BearSSL::X509List cloudCA(FIREFLY_CLOUD_CERT_PEM);
+    sslClient.setTrustAnchors(&cloudCA);
+#else
     sslClient.setInsecure();
+#endif
 
     HTTPClient http;
     String postUrl = cloudUrl + "/devices/register";
