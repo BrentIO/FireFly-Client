@@ -34,6 +34,17 @@
 #define LONG_FLASH_ON_MS           100UL
 #define LONG_HOLD_FLOOR_PCT        5
 
+// Tag LED animations
+#define TAG_MAX_COUNT          5
+#define TAG_NAME_MAX_LENGTH    20
+#define TAG_STATE_NORMAL       0
+#define TAG_STATE_SNORE        1
+#define TAG_STATE_BLINK        2
+#define TAG_STATE_BLINK_RAPID  3
+#define TAG_SNORE_STEP_MS      3UL   // 1023 steps × 3 ms × 2 directions ≈ 6 s full cycle
+#define TAG_BLINK_MS           750UL // from original FireFly_Client LED_BLINK_MS
+#define TAG_BLINK_RAPID_MS     375UL // half of TAG_BLINK_MS
+
 // ─── File paths ───────────────────────────────────────────────────────────────
 
 #define CONFIG_FILE   "/config.json"
@@ -53,6 +64,7 @@
 #define MQTT_LED_BRIGHTNESS_TOPIC  "FireFly/%s/leds/brightness/set"
 #define MQTT_CERT_STATE_TOPIC      "FireFly/%s/cert/state"
 #define MQTT_CERT_BROADCAST_TOPIC  "FireFly/clients/cert/state"
+#define MQTT_TAG_SET_TOPIC         "FireFly/tag/%s/set"
 
 // ─── Data structures ──────────────────────────────────────────────────────────
 
@@ -75,6 +87,17 @@ struct LedChannel {
     // longPressPhase: 0 = idle, 1 = flash phase, 2 = hold phase
     uint8_t       longPressPhase;
     unsigned long longFlashAt;          // millis() when flash phase ends
+
+    // Tag animation
+    char          tags[TAG_MAX_COUNT][TAG_NAME_MAX_LENGTH + 1];
+    int           tagCount;
+    uint8_t       tagState;             // TAG_STATE_* constants
+    int           defaultBrightness;    // PWM from config; never changed at runtime
+    int           tagBrightness;        // PWM ceiling commanded by last tag payload
+    int           tagPwmCurrent;        // current PWM during snore sweep
+    int           tagPwmDirection;      // +1 = rising, -1 = falling (snore only)
+    bool          tagBlinkOn;           // current on/off phase (blink / blink-rapid)
+    unsigned long tagTickAt;            // millis() of next animation tick
 };
 
 struct Config {
@@ -133,10 +156,12 @@ void   mqttCallback(char* topic, byte* payload, unsigned int length);
 void   handleInputState(const String& portId, int channel, const String& state);
 void   handleBrightnessCommand(const String& payload);
 void   handleCertBroadcast(const String& payload);
+void   handleTagCommand(const String& tagName, const String& payload);
 void   setLedRetained(int idx, int pwmValue);
 int    percentToPwm(int pct);
 void   tickExcessiveFlash(int idx);
 void   tickLongPress(int idx);
+void   tickTagAnimation(int idx);
 void   rotateLeds();
 void   checkOta();
 String buildTopic(const char* pattern);
@@ -225,12 +250,9 @@ void loop() {
     }
 
     for (int i = 0; i < cfg.ledCount; i++) {
-        if (cfg.leds[i].excessiveFlashStep > 0) {
-            tickExcessiveFlash(i);
-        }
-        if (cfg.leds[i].longPressPhase > 0) {
-            tickLongPress(i);
-        }
+        if (cfg.leds[i].excessiveFlashStep > 0)        tickExcessiveFlash(i);
+        if (cfg.leds[i].longPressPhase > 0)            tickLongPress(i);
+        if (cfg.leds[i].tagState != TAG_STATE_NORMAL)  tickTagAnimation(i);
     }
 }
 
@@ -345,13 +367,22 @@ bool loadConfig() {
 
     // Initialize all slots; unconfigured slots stay with empty portId
     for (int i = 0; i < LED_CHANNEL_COUNT; i++) {
-        cfg.leds[i].pin = LED_PINS[i];
-        cfg.leds[i].portId = "";
-        cfg.leds[i].channelNumber = 0;
+        cfg.leds[i].pin                = LED_PINS[i];
+        cfg.leds[i].portId             = "";
+        cfg.leds[i].channelNumber      = 0;
         cfg.leds[i].retainedBrightness = 0;
-        cfg.leds[i].savedBrightness = 0;
+        cfg.leds[i].savedBrightness    = 0;
         cfg.leds[i].excessiveFlashStep = 0;
-        cfg.leds[i].longPressPhase = 0;
+        cfg.leds[i].longPressPhase     = 0;
+        cfg.leds[i].defaultBrightness  = 0;
+        cfg.leds[i].tagCount           = 0;
+        cfg.leds[i].tagState           = TAG_STATE_NORMAL;
+        cfg.leds[i].tagBrightness      = 0;
+        cfg.leds[i].tagPwmCurrent      = 0;
+        cfg.leds[i].tagPwmDirection    = 1;
+        cfg.leds[i].tagBlinkOn         = false;
+        cfg.leds[i].tagTickAt          = 0;
+        memset(cfg.leds[i].tags, 0, sizeof(cfg.leds[i].tags));
     }
 
     // id is a root-level field shared by all HIDs on this client (same port on the controller).
@@ -368,8 +399,22 @@ bool loadConfig() {
         int idx = ch - 1;  // 0-based index into LED_PINS[]
         cfg.leds[idx].portId             = portId;
         cfg.leds[idx].channelNumber      = ch;
-        cfg.leds[idx].retainedBrightness = percentToPwm(hid["defaultBrightness"] | 100);
-        cfg.leds[idx].savedBrightness    = cfg.leds[idx].retainedBrightness;
+        cfg.leds[idx].defaultBrightness  = percentToPwm(hid["defaultBrightness"] | 100);
+        cfg.leds[idx].retainedBrightness = cfg.leds[idx].defaultBrightness;
+        cfg.leds[idx].savedBrightness    = cfg.leds[idx].defaultBrightness;
+        cfg.leds[idx].tagBrightness      = cfg.leds[idx].defaultBrightness;
+
+        JsonArray tagArr = hid["tags"].as<JsonArray>();
+        cfg.leds[idx].tagCount = 0;
+        for (JsonVariant tagVar : tagArr) {
+            if (cfg.leds[idx].tagCount >= TAG_MAX_COUNT) break;
+            const char* tn = tagVar.as<const char*>();
+            if (!tn || strlen(tn) == 0 || strlen(tn) > TAG_NAME_MAX_LENGTH) continue;
+            strncpy(cfg.leds[idx].tags[cfg.leds[idx].tagCount], tn, TAG_NAME_MAX_LENGTH);
+            cfg.leds[idx].tags[cfg.leds[idx].tagCount][TAG_NAME_MAX_LENGTH] = '\0';
+            cfg.leds[idx].tagCount++;
+        }
+
         cfg.ledCount = ch;
     }
 
@@ -539,6 +584,15 @@ void connectMqtt() {
     mqttClient.subscribe(buildTopic(MQTT_UPDATE_SET_TOPIC).c_str());
     mqttClient.subscribe(MQTT_CERT_BROADCAST_TOPIC);
 
+    // Subscribe to tag topics; duplicate subscriptions are harmless under MQTT 3.1.1
+    char tagTopic[64];
+    for (int i = 0; i < cfg.ledCount; i++) {
+        for (int t = 0; t < cfg.leds[i].tagCount; t++) {
+            snprintf(tagTopic, sizeof(tagTopic), MQTT_TAG_SET_TOPIC, cfg.leds[i].tags[t]);
+            mqttClient.subscribe(tagTopic);
+        }
+    }
+
     publishTelemetry();
     publishAutoDiscovery();
 
@@ -589,6 +643,12 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         handleCertBroadcast(p);
         return;
     }
+
+    // Tag command: FireFly/tag/{tag_name}/set  (tag name is at least 1 char)
+    if (t.startsWith("FireFly/tag/") && t.endsWith("/set") && t.length() > 16) {
+        handleTagCommand(t.substring(12, t.length() - 4), p);
+        return;
+    }
 }
 
 // ─── LED: input state handling ───────────────────────────────────────────────
@@ -601,7 +661,11 @@ void handleInputState(const String& portId, int channelNumber, const String& sta
         if (state == "NORMAL") {
             cfg.leds[i].excessiveFlashStep = 0;
             cfg.leds[i].longPressPhase     = 0;
-            ledWrite(cfg.leds[i].pin, cfg.leds[i].retainedBrightness);
+            if (cfg.leds[i].tagState != TAG_STATE_NORMAL) {
+                cfg.leds[i].tagTickAt = millis(); // resume tag animation immediately
+            } else {
+                ledWrite(cfg.leds[i].pin, cfg.leds[i].retainedBrightness);
+            }
 
         } else if (state == "SHORT") {
             cfg.leds[i].savedBrightness = cfg.leds[i].retainedBrightness;
@@ -640,7 +704,11 @@ void tickExcessiveFlash(int idx) {
     } else {
         if (led.excessiveFlashStep >= EXCESSIVE_FLASH_COUNT * 2) {
             led.excessiveFlashStep = 0;
-            ledWrite(led.pin, led.retainedBrightness);
+            if (led.tagState != TAG_STATE_NORMAL) {
+                led.tagTickAt = millis();
+            } else {
+                ledWrite(led.pin, led.retainedBrightness);
+            }
         } else {
             ledWrite(led.pin, LED_PWM_MAX);
             led.excessiveFlashAt = millis() + EXCESSIVE_FLASH_ON_MS;
@@ -664,6 +732,32 @@ void tickLongPress(int idx) {
     ledWrite(led.pin, holdLevel);
 }
 
+// ─── LED: tag animation state machine ────────────────────────────────────────
+
+void tickTagAnimation(int idx) {
+    LedChannel& led = cfg.leds[idx];
+    if (millis() < led.tagTickAt) return;
+
+    bool buttonActive = (led.excessiveFlashStep > 0 || led.longPressPhase > 0);
+
+    if (led.tagState == TAG_STATE_SNORE) {
+        led.tagPwmCurrent += led.tagPwmDirection;
+        if (led.tagPwmCurrent >= led.tagBrightness) {
+            led.tagPwmCurrent   = led.tagBrightness;
+            led.tagPwmDirection = -1;
+        } else if (led.tagPwmCurrent <= 0) {
+            led.tagPwmCurrent   = 0;
+            led.tagPwmDirection = 1;
+        }
+        if (!buttonActive) ledWrite(led.pin, led.tagPwmCurrent);
+        led.tagTickAt = millis() + TAG_SNORE_STEP_MS;
+    } else {
+        led.tagBlinkOn = !led.tagBlinkOn;
+        if (!buttonActive) ledWrite(led.pin, led.tagBlinkOn ? led.tagBrightness : 0);
+        led.tagTickAt = millis() + (led.tagState == TAG_STATE_BLINK ? TAG_BLINK_MS : TAG_BLINK_RAPID_MS);
+    }
+}
+
 // ─── LED: brightness commands ────────────────────────────────────────────────
 
 // Payload is a numeric brightness percentage (0–100), applied to all configured LEDs
@@ -680,8 +774,66 @@ void handleBrightnessCommand(const String& payload) {
 
 void setLedRetained(int idx, int pwmValue) {
     cfg.leds[idx].retainedBrightness = pwmValue;
-    if (cfg.leds[idx].excessiveFlashStep == 0) {
+    if (cfg.leds[idx].excessiveFlashStep == 0 && cfg.leds[idx].tagState == TAG_STATE_NORMAL) {
         ledWrite(cfg.leds[idx].pin, pwmValue);
+    }
+}
+
+// ─── LED: tag command handling ───────────────────────────────────────────────
+
+void handleTagCommand(const String& tagName, const String& payload) {
+    JsonDocument doc;
+    if (deserializeJson(doc, payload) != DeserializationError::Ok) return;
+
+    String stateStr = doc["state"].as<String>();
+    uint8_t newTagState;
+    if      (stateStr == "snore")       newTagState = TAG_STATE_SNORE;
+    else if (stateStr == "blink")       newTagState = TAG_STATE_BLINK;
+    else if (stateStr == "blink-rapid") newTagState = TAG_STATE_BLINK_RAPID;
+    else if (stateStr == "normal")      newTagState = TAG_STATE_NORMAL;
+    else return;
+
+    for (int i = 0; i < cfg.ledCount; i++) {
+        bool hasTag = false;
+        for (int t = 0; t < cfg.leds[i].tagCount; t++) {
+            if (strcmp(cfg.leds[i].tags[t], tagName.c_str()) == 0) { hasTag = true; break; }
+        }
+        if (!hasTag) continue;
+
+        LedChannel& led = cfg.leds[i];
+        led.tagState = newTagState;
+
+        if (newTagState == TAG_STATE_NORMAL) {
+            led.tagBrightness   = led.defaultBrightness;
+            led.tagPwmCurrent   = 0;
+            led.tagPwmDirection = 1;
+            led.tagBlinkOn      = false;
+            led.tagTickAt       = 0;
+            if (led.excessiveFlashStep == 0 && led.longPressPhase == 0) {
+                ledWrite(led.pin, led.defaultBrightness);
+            }
+        } else {
+            if (doc["brightness"].is<int>()) {
+                int pct = doc["brightness"].as<int>();
+                if (pct < 0)   pct = 0;
+                if (pct > 100) pct = 100;
+                led.tagBrightness = percentToPwm(pct);
+            } else {
+                led.tagBrightness = led.defaultBrightness;
+            }
+
+            if (newTagState == TAG_STATE_SNORE) {
+                led.tagPwmCurrent   = 0;
+                led.tagPwmDirection = 1;
+                led.tagTickAt       = millis() + TAG_SNORE_STEP_MS;
+            } else {
+                led.tagBlinkOn = true;
+                led.tagTickAt  = millis() + (newTagState == TAG_STATE_BLINK ? TAG_BLINK_MS : TAG_BLINK_RAPID_MS);
+                if (led.excessiveFlashStep == 0 && led.longPressPhase == 0) {
+                    ledWrite(led.pin, led.tagBrightness);
+                }
+            }
+        }
     }
 }
 
