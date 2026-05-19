@@ -731,20 +731,30 @@ void checkOta() {
 
     String latestVersion = doc["version"].as<String>();
     String firmwareUrl   = doc["url"].as<String>();
+    String title         = doc["title"].as<String>();
+    String releaseUrl    = doc["release_url"].as<String>();
 
     if (latestVersion == VERSION || firmwareUrl.length() == 0) return;
 
-    {
+    auto publishState = [&](bool inProgress, int pct) {
         JsonDocument stateDoc;
         stateDoc["installed_version"] = VERSION;
         stateDoc["latest_version"]    = latestVersion;
-        stateDoc["in_progress"]       = false;
+        stateDoc["in_progress"]       = inProgress;
+        stateDoc["update_percentage"] = pct;
+        if (title.length() > 0)      stateDoc["title"]       = title;
+        if (releaseUrl.length() > 0) stateDoc["release_url"] = releaseUrl;
         String statePayload;
         serializeJson(stateDoc, statePayload);
         mqttClient.publish(buildTopic(MQTT_UPDATE_STATE_TOPIC).c_str(), statePayload.c_str(), true);
-    }
+    };
+
+    publishState(false, 0);
 
     ESPhttpUpdate.setLedPin(LED_BUILTIN, LOW);
+    ESPhttpUpdate.onProgress([&](int cur, int total) {
+        if (total > 0) publishState(true, (cur * 100) / total);
+    });
 
     WiFiClientSecure updateClient;
     BearSSL::X509List updateCA;
