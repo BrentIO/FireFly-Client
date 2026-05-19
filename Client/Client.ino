@@ -78,6 +78,9 @@ struct LedChannel {
 };
 
 struct Config {
+    String     id;
+    String     name;
+    String     area;
     String     wifiSsid;
     String     wifiPassword;
     String     mqttHost;
@@ -326,6 +329,9 @@ bool loadConfig() {
     if (deserializeJson(doc, f) != DeserializationError::Ok) { f.close(); return false; }
     f.close();
 
+    cfg.id           = doc["id"].as<String>();
+    cfg.name         = doc["name"].as<String>();
+    cfg.area         = doc["area"].as<String>();
     cfg.wifiSsid     = doc["wifi"]["ssid"].as<String>();
     cfg.wifiPassword = doc["wifi"]["password"].as<String>();
     cfg.mqttHost     = doc["mqtt"]["host"].as<String>();
@@ -647,13 +653,14 @@ void publishAutoDiscovery() {
     auto addDevice = [&](JsonDocument& doc) {
         JsonObject device = doc["device"].to<JsonObject>();
         JsonArray  ids    = device["identifiers"].to<JsonArray>();
-        ids.add("FireFly-" + uuid);
-        device["name"]          = uuid;
+        ids.add(uuid);
+        device["name"]          = cfg.name;
         device["manufacturer"]  = HARDWARE_MANUFACTURER_NAME;
         device["model"]         = APPLICATION_NAME;
         device["model_id"]      = PRODUCT_ID;
         device["serial_number"] = uuid;
         device["sw_version"]    = VERSION;
+        if (cfg.area.length() > 0) device["suggested_area"] = cfg.area;
     };
 
     auto publishSensor = [&](const char* id, const char* name, const char* stateTopic, const char* icon) {
