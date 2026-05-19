@@ -102,6 +102,9 @@ PubSubClient mqttClient(wifiClient);
 
 String certPem;
 String certFingerprint;
+String certCommonName;
+String certOrganization;
+String certExpiration;
 
 int    errorCount = 0;
 time_t bootTime   = 0;
@@ -381,6 +384,104 @@ bool saveConfig(const String& json) {
     return true;
 }
 
+static String dnField(const uint8_t* dn, size_t len, uint8_t oidFinal) {
+    // Scan for DER OID pattern {0x06, 0x03, 0x55, 0x04, oidFinal} and extract the value.
+    for (size_t i = 0; i + 6 < len; i++) {
+        if (dn[i]   != 0x06) continue;
+        if (dn[i+1] != 0x03) continue;
+        if (dn[i+2] != 0x55) continue;
+        if (dn[i+3] != 0x04) continue;
+        if (dn[i+4] != oidFinal) continue;
+        uint8_t tag = dn[i+5];
+        if (i + 7 >= len) break;
+        uint8_t vlen = dn[i+6];
+        if (vlen & 0x80) break;  // long-form length; shouldn't occur in 2.5.4.x
+        if (i + 7 + vlen > len) break;
+        const uint8_t* vp = dn + i + 7;
+        if (tag == 0x1E) {
+            // BMPString (UTF-16BE): extract ASCII bytes at odd offsets
+            String s;
+            for (uint8_t k = 1; k < vlen; k += 2) s += (char)vp[k];
+            return s;
+        }
+        if (tag == 0x0C || tag == 0x13 || tag == 0x16) {
+            return String((const char*)vp).substring(0, vlen);
+        }
+    }
+    return String();
+}
+
+struct PemDerCtx {
+    uint8_t data[2048];
+    size_t  len;
+};
+
+static void pemDerAppend(void* ctx, const void* src, size_t len) {
+    PemDerCtx* p = (PemDerCtx*)ctx;
+    if (p->len + len > sizeof(p->data)) len = sizeof(p->data) - p->len;
+    memcpy(p->data + p->len, src, len);
+    p->len += len;
+}
+
+struct DnCtx {
+    uint8_t data[512];
+    size_t  len;
+};
+
+static void dnAppend(void* ctx, const void* src, size_t len) {
+    DnCtx* d = (DnCtx*)ctx;
+    if (d->len + len > sizeof(d->data)) len = sizeof(d->data) - d->len;
+    memcpy(d->data + d->len, src, len);
+    d->len += len;
+}
+
+static void parseCertMetadata(const String& pem) {
+    certCommonName   = String();
+    certOrganization = String();
+    certExpiration   = String();
+
+    PemDerCtx der;
+    der.len = 0;
+
+    br_pem_decoder_context pemCtx;
+    br_pem_decoder_init(&pemCtx);
+    br_pem_decoder_setdest(&pemCtx, pemDerAppend, &der);
+
+    const char* src = pem.c_str();
+    size_t remaining = pem.length();
+    bool done = false;
+    while (remaining > 0 && !done) {
+        size_t consumed = br_pem_decoder_push(&pemCtx, src, remaining);
+        src       += consumed;
+        remaining -= consumed;
+        int event = br_pem_decoder_event(&pemCtx);
+        if (event == BR_PEM_END_OBJ) done = true;
+        if (event == BR_PEM_ERROR)   return;
+    }
+
+    if (der.len == 0) return;
+
+    DnCtx dn;
+    dn.len = 0;
+
+    br_x509_decoder_context x509;
+    br_x509_decoder_init(&x509, dnAppend, &dn, nullptr, nullptr);
+    br_x509_decoder_push(&x509, der.data, der.len);
+
+    uint32_t days    = x509.notafter_days;
+    uint32_t seconds = x509.notafter_seconds;
+    if (days > 0) {
+        time_t t = ((int64_t)days - 719162LL) * 86400LL + seconds;
+        struct tm* gt = gmtime(&t);
+        char buf[11];
+        snprintf(buf, sizeof(buf), "%04d-%02d-%02d", gt->tm_year + 1900, gt->tm_mon + 1, gt->tm_mday);
+        certExpiration = String(buf);
+    }
+
+    certCommonName   = dnField(dn.data, dn.len, 0x03);
+    certOrganization = dnField(dn.data, dn.len, 0x0A);
+}
+
 bool loadCert() {
     File f = LittleFS.open(CERT_FILE, "r");
     if (!f) return false;
@@ -393,6 +494,8 @@ bool loadCert() {
         certFingerprint.trim();
         ff.close();
     }
+
+    parseCertMetadata(certPem);
 
     return certPem.length() > 0;
 }
@@ -660,7 +763,10 @@ void publishAutoDiscovery() {
         device["model_id"]      = PRODUCT_ID;
         device["serial_number"] = uuid;
         device["sw_version"]    = VERSION;
-        if (cfg.area.length() > 0) device["suggested_area"] = cfg.area;
+        if (cfg.area.length() > 0)         device["suggested_area"]   = cfg.area;
+        if (certCommonName.length() > 0)   device["cert_common_name"] = certCommonName;
+        if (certOrganization.length() > 0) device["cert_organization"]= certOrganization;
+        if (certExpiration.length() > 0)   device["cert_expiration"]  = certExpiration;
     };
 
     auto publishSensor = [&](const char* id, const char* name, const char* stateTopic, const char* icon) {
@@ -807,8 +913,15 @@ void handleCertBroadcast(const String& payload) {
     File ff = LittleFS.open(CERT_FP_FILE, "w");
     if (ff) { ff.print(fp); ff.close(); }
 
+    certCommonName   = String();
+    certOrganization = String();
+    certExpiration   = String();
+
     certPem         = pem;
     certFingerprint = fp;
 
+    parseCertMetadata(certPem);
+
     mqttClient.publish(buildTopic(MQTT_CERT_STATE_TOPIC).c_str(), certFingerprint.c_str(), true);
+    publishAutoDiscovery();
 }
