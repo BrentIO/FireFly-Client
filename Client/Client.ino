@@ -16,6 +16,7 @@
 // ─── Firmware version ────────────────────────────────────────────────────────
 
 #define APPLICATION_NAME "FireFly Client"
+#define APPLICATION      "Client"
 
 #ifndef VERSION
     #define VERSION "DEBUG"
@@ -980,6 +981,7 @@ void checkOta() {
     url.replace("$$mac_colons$$", rawMac.c_str());
     url.replace("$$uuid$$", deviceIdentity.data.uuid);
     url.replace("$$class$$", HARDWARE_CLASS);
+    url.replace("$$application$$", APPLICATION);
 
     char hexStr[11];
     snprintf(hexStr, sizeof(hexStr), "0x%08X", (uint32_t)PRODUCT_HEX);
