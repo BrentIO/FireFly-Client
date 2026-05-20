@@ -278,11 +278,18 @@ jobs:
                 '. += [{name: $name, sha256: $sha256}]')
           done < <(find "$ROOT" -type f)
 
+          # Map application to firmware_type
+          case "$APPLICATION" in
+            Client) FIRMWARE_TYPE="FireFly Client" ;;
+            Hardware-Registration-and-Configuration) FIRMWARE_TYPE="FireFly Hardware Registration and Configuration" ;;
+            *) FIRMWARE_TYPE="$APPLICATION" ;;
+          esac
+
           JSON=$(jq -nc \
             --arg class "client" \
             --arg product_id "${{ matrix.product_id }}" \
             --arg product_hex "${{ matrix.product_hex }}" \
-            --arg firmware_type "FireFly Client" \
+            --arg firmware_type "$FIRMWARE_TYPE" \
             --arg application "${{ matrix.application }}" \
             --arg branch "${{ env.BRANCH }}" \
             --arg version "${{ env.VERSION }}" \
@@ -328,7 +335,7 @@ jobs:
         if: ${{ !env.ACT }}
         run: |
           OUTDIR="${{ env.ARTIFACT_ROOT }}/${{ matrix.product_id }}/${{ matrix.application }}/${{ env.BRANCH }}-${{ env.COMMIT_HASH }}"
-          DEST_KEY="incoming/client-${{ matrix.product_hex }}-${{ env.BRANCH }}-${{ env.COMMIT_HASH }}.zip"
+          DEST_KEY="incoming/${{ matrix.application }}-${{ matrix.product_hex }}-${{ env.BRANCH }}-${{ env.COMMIT_HASH }}.zip"
 
           cd "$OUTDIR"
           zip -r /tmp/firmware-upload.zip .
@@ -444,11 +451,16 @@ jobs:
           fi
 
           git commit -m "Update core and library versions from FireFly-Client ${{ env.BRANCH }}"
-          git push origin "$SYNC_BRANCH"
+          git push --force origin "$SYNC_BRANCH"
 
-          gh pr create \
-            --repo BrentIO/FireFly-Docs \
-            --title "Update core and library versions from FireFly-Client ${{ env.BRANCH }}" \
-            --body "Automated core and library version sync triggered by production build of \`${{ env.BRANCH }}\`." \
-            --base main \
-            --head "$SYNC_BRANCH"
+          EXISTING_PR=$(gh pr list --repo BrentIO/FireFly-Docs --head "$SYNC_BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)
+          if [ -n "$EXISTING_PR" ]; then
+            echo "PR #$EXISTING_PR already exists for $SYNC_BRANCH, skipping"
+          else
+            gh pr create \
+              --repo BrentIO/FireFly-Docs \
+              --title "Update core and library versions from FireFly-Client ${{ env.BRANCH }}" \
+              --body "Automated core and library version sync triggered by production build of \`${{ env.BRANCH }}\`." \
+              --base main \
+              --head "$SYNC_BRANCH"
+          fi
