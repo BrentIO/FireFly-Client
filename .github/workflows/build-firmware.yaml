@@ -444,11 +444,16 @@ jobs:
           fi
 
           git commit -m "Update core and library versions from FireFly-Client ${{ env.BRANCH }}"
-          git push origin "$SYNC_BRANCH"
+          git push --force origin "$SYNC_BRANCH"
 
-          gh pr create \
-            --repo BrentIO/FireFly-Docs \
-            --title "Update core and library versions from FireFly-Client ${{ env.BRANCH }}" \
-            --body "Automated core and library version sync triggered by production build of \`${{ env.BRANCH }}\`." \
-            --base main \
-            --head "$SYNC_BRANCH"
+          EXISTING_PR=$(gh pr list --repo BrentIO/FireFly-Docs --head "$SYNC_BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)
+          if [ -n "$EXISTING_PR" ]; then
+            echo "PR #$EXISTING_PR already exists for $SYNC_BRANCH, skipping"
+          else
+            gh pr create \
+              --repo BrentIO/FireFly-Docs \
+              --title "Update core and library versions from FireFly-Client ${{ env.BRANCH }}" \
+              --body "Automated core and library version sync triggered by production build of \`${{ env.BRANCH }}\`." \
+              --base main \
+              --head "$SYNC_BRANCH"
+          fi
