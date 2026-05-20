@@ -992,12 +992,6 @@ void checkOta() {
     url.replace("$$product_hex$$", hexStr);
     url.replace("$$current_version$$", VERSION);
 
-    if (url.indexOf("current_version=") == -1) {
-        url += (url.indexOf('?') == -1 ? "?" : "&");
-        url += "current_version=";
-        url += VERSION;
-    }
-
     WiFiClientSecure checkClient;
     BearSSL::X509List checkCA;
     if (certPem.length() > 0) {
