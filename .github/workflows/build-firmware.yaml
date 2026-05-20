@@ -278,15 +278,15 @@ jobs:
                 '. += [{name: $name, sha256: $sha256}]')
           done < <(find "$ROOT" -type f)
 
-          # Map application to firmware_type and class
+          # Map application to firmware_type
           case "$APPLICATION" in
-            Client) FIRMWARE_TYPE="FireFly Client" ; CLASS="client" ;;
-            Hardware-Registration-and-Configuration) FIRMWARE_TYPE="FireFly Hardware Registration and Configuration" ; CLASS="hardware-registration" ;;
-            *) FIRMWARE_TYPE="$APPLICATION" ; CLASS=$(echo "$APPLICATION" | tr '[:upper:]' '[:lower:]' | tr ' ' '-') ;;
+            Client) FIRMWARE_TYPE="FireFly Client" ;;
+            Hardware-Registration-and-Configuration) FIRMWARE_TYPE="FireFly Hardware Registration and Configuration" ;;
+            *) FIRMWARE_TYPE="$APPLICATION" ;;
           esac
 
           JSON=$(jq -nc \
-            --arg class "$CLASS" \
+            --arg class "client" \
             --arg product_id "${{ matrix.product_id }}" \
             --arg product_hex "${{ matrix.product_hex }}" \
             --arg firmware_type "$FIRMWARE_TYPE" \
