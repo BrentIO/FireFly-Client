@@ -968,12 +968,29 @@ void checkOta() {
     if (cfg.otaUrl.length() == 0) return;
 
     String url = cfg.otaUrl;
-    char hexStr[16];
-    snprintf(hexStr, sizeof(hexStr), "0x%08X", (uint32_t)PRODUCT_HEX);
-    url.replace("$$hex$$", hexStr);
+
+    String rawMac = WiFi.macAddress();
+    String otaMacOnly = rawMac;
+    otaMacOnly.replace(":", "");
+    String otaMacDashes = rawMac;
+    otaMacDashes.replace(":", "-");
+
+    url.replace("$$mac$$", otaMacOnly.c_str());
+    url.replace("$$mac_dashes$$", otaMacDashes.c_str());
+    url.replace("$$mac_colons$$", rawMac.c_str());
+    url.replace("$$uuid$$", deviceIdentity.data.uuid);
     url.replace("$$class$$", HARDWARE_CLASS);
-    url += "?current_version=";
-    url += VERSION;
+
+    char hexStr[11];
+    snprintf(hexStr, sizeof(hexStr), "0x%08X", (uint32_t)PRODUCT_HEX);
+    url.replace("$$product_hex$$", hexStr);
+    url.replace("$$current_version$$", VERSION);
+
+    if (url.indexOf("current_version=") == -1) {
+        url += (url.indexOf('?') == -1 ? "?" : "&");
+        url += "current_version=";
+        url += VERSION;
+    }
 
     WiFiClientSecure checkClient;
     BearSSL::X509List checkCA;
