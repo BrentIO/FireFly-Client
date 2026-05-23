@@ -58,7 +58,6 @@ body:
     attributes:
       label: Hardware variant
       options:
-        - FFI0600-2011
         - Other / Unknown
     validations:
       required: false

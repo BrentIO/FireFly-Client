@@ -26,7 +26,7 @@ const products = sections
 
 const optionLines = [...products.map(p => `        - ${p.pid}`), '        - Other / Unknown'].join('\n') + '\n'
 
-const formPath = resolve(repoRoot, '.github/ISSUE_TEMPLATE/bug_report.yml')
+const formPath = resolve(repoRoot, '.github/ISSUE_TEMPLATE/bug_report.yaml')
 const original = readFileSync(formPath, 'utf8')
 
 const pattern = /([ \t]+-[ \t]type: dropdown\n[ \t]+id: product[\s\S]*?options:\n)((?:[ \t]+-[ \t].+\n)+)/
