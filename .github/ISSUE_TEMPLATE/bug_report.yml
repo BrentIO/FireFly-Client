@@ -49,7 +49,7 @@ body:
       label: Application
       options:
         - Client
-        - Hardware Registration and Configuration (HW-Reg)
+        - Hardware Registration and Configuration
     validations:
       required: false
 
