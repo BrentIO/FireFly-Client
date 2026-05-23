@@ -51,7 +51,7 @@ body:
         - Client
         - Hardware Registration and Configuration
     validations:
-      required: false
+      required: true
 
   - type: dropdown
     id: product
@@ -61,7 +61,7 @@ body:
         - FFI0600-2011
         - Other / Unknown
     validations:
-      required: false
+      required: true
 
   - type: input
     id: firmware_version
@@ -69,7 +69,7 @@ body:
       label: Firmware version
       placeholder: "e.g. 2025.04.01"
     validations:
-      required: false
+      required: true
 
   - type: textarea
     id: logs
