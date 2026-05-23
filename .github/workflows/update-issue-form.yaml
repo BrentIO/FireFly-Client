@@ -19,14 +19,21 @@ jobs:
       - name: Update hardware variants in bug report form
         run: node scripts/update-issue-form.mjs
 
-      - name: Commit if changed
+      - name: Open PR if changed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           if git diff --quiet .github/ISSUE_TEMPLATE/bug_report.yaml; then
             echo "No changes to bug_report.yaml"
           else
+            BRANCH="chore/update-issue-form-$(date +%Y%m%d%H%M%S)"
+            git checkout -b "$BRANCH"
             git add .github/ISSUE_TEMPLATE/bug_report.yaml
-            git commit -m "Update hardware variants in bug report form [skip ci]"
-            git push
+            git commit -m "Update hardware variants in bug report form"
+            git push origin "$BRANCH"
+            gh pr create --title "Update hardware variants in bug report form" \
+              --body "Automated update of hardware variant options in \`bug_report.yaml\` from changes to \`devices.yaml\`." \
+              --base main --head "$BRANCH"
           fi
