@@ -1,0 +1,37 @@
+name: 🚀 Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (YYYY.MM.bb)'
+        required: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Validate version format
+        run: |
+          if [[ ! "${{ inputs.version }}" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}$ ]]; then
+            echo "❌ Invalid version format: ${{ inputs.version }}. Expected YYYY.MM.bb"
+            exit 1
+          fi
+          echo "✅ Version format is valid: ${{ inputs.version }}"
+
+      - name: Tag and push
+        run: |
+          git tag ${{ inputs.version }}
+          git push origin ${{ inputs.version }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ inputs.version }}
+          generate_release_notes: true
