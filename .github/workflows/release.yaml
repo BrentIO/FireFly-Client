@@ -8,11 +8,13 @@ on:
         description: 'Release version (YYYY.MM.bb)'
         required: true
 
+permissions:
+  contents: write
+  actions: write
+
 jobs:
   release:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -20,7 +22,7 @@ jobs:
 
       - name: Validate version format
         run: |
-          if [[ ! "${{ inputs.version }}" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}$ ]]; then
+          if [[ ! "${{ inputs.version }}" =~ ^[0-9]{4}\.(0[1-9]|1[0-2])\.[0-9]{2}$ ]]; then
             echo "❌ Invalid version format: ${{ inputs.version }}. Expected YYYY.MM.bb"
             exit 1
           fi
@@ -36,3 +38,8 @@ jobs:
         with:
           tag_name: ${{ inputs.version }}
           generate_release_notes: true
+
+      - name: Build firmware for production
+        run: gh workflow run build-firmware.yaml --ref ${{ inputs.version }} -f target_env=production
+        env:
+          GH_TOKEN: ${{ github.token }}
