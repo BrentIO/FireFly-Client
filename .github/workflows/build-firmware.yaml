@@ -180,7 +180,7 @@ jobs:
         env:
           FIREFLY_CLOUD_API_ROOT: ${{ vars.FIREFLY_CLOUD_API_ROOT }}
         run: |
-          set -e
+          set -eo pipefail
 
           BRANCH="${{ env.BRANCH }}"
           COMMIT_HASH="${{ env.COMMIT_HASH }}"
@@ -195,13 +195,13 @@ jobs:
                 -b "${{ matrix.fqbn }}" ./${APPLICATION} \
                 --warnings more --clean \
                 --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DFIREFLY_CLOUD_API_ROOT=\"${FIREFLY_CLOUD_API_ROOT}\" -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -DVERSION=\"9999.99.99\" -DCOMMIT_HASH=\"${COMMIT_HASH}\" -I${{ github.workspace }}" \
-                --output-dir "$OUTDIR"
+                --output-dir "$OUTDIR" 2>&1 | tee /tmp/compile_output.txt
             else
               arduino-cli compile \
                 -b "${{ matrix.fqbn }}" ./${APPLICATION} \
                 --warnings more --clean \
                 --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -DVERSION=\"9999.99.99\" -DCOMMIT_HASH=\"${COMMIT_HASH}\" -I${{ github.workspace }}" \
-                --output-dir "$OUTDIR"
+                --output-dir "$OUTDIR" 2>&1 | tee /tmp/compile_output.txt
             fi
           else
             echo "Building RELEASE firmware ($VERSION)"
@@ -210,15 +210,37 @@ jobs:
                 -b "${{ matrix.fqbn }}" ./${APPLICATION} \
                 --warnings more --clean \
                 --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DFIREFLY_CLOUD_API_ROOT=\"${FIREFLY_CLOUD_API_ROOT}\" -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=0 -DVERSION=\"${VERSION}\" -DCOMMIT_HASH=\"${COMMIT_HASH}\" -I${{ github.workspace }}" \
-                --output-dir "$OUTDIR"
+                --output-dir "$OUTDIR" 2>&1 | tee /tmp/compile_output.txt
             else
               arduino-cli compile \
                 -b "${{ matrix.fqbn }}" ./${APPLICATION} \
                 --warnings more --clean \
                 --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=0 -DVERSION=\"${VERSION}\" -DCOMMIT_HASH=\"${COMMIT_HASH}\" -I${{ github.workspace }}" \
-                --output-dir "$OUTDIR"
+                --output-dir "$OUTDIR" 2>&1 | tee /tmp/compile_output.txt
             fi
           fi
+
+          FLASH_USED=$(grep "Sketch uses"          /tmp/compile_output.txt | sed 's/Sketch uses \([0-9]*\) bytes.*/\1/')
+          FLASH_MAX=$(grep  "Sketch uses"          /tmp/compile_output.txt | sed 's/.*Maximum is \([0-9]*\) bytes.*/\1/')
+          RAM_USED=$(grep   "Global variables use" /tmp/compile_output.txt | sed 's/Global variables use \([0-9]*\) bytes.*/\1/')
+          RAM_MAX=$(grep    "Global variables use" /tmp/compile_output.txt | sed 's/.*Maximum is \([0-9]*\) bytes.*/\1/')
+
+          echo "FLASH_USED=$FLASH_USED" >> $GITHUB_ENV
+          echo "FLASH_MAX=$FLASH_MAX"   >> $GITHUB_ENV
+          echo "RAM_USED=$RAM_USED"     >> $GITHUB_ENV
+          echo "RAM_MAX=$RAM_MAX"       >> $GITHUB_ENV
+
+          FLASH_AVAIL=$((FLASH_MAX - FLASH_USED))
+          RAM_AVAIL=$((RAM_MAX - RAM_USED))
+          FLASH_PCT=$(( (FLASH_USED * 100) / FLASH_MAX ))
+          RAM_PCT=$(( (RAM_USED * 100) / RAM_MAX ))
+
+          {
+            echo "| | Used | Maximum | Available | % Used |"
+            echo "|---|---|---|---|---|"
+            printf "| Flash | %d bytes | %d bytes | %d bytes | %d%% |\n" $FLASH_USED $FLASH_MAX $FLASH_AVAIL $FLASH_PCT
+            printf "| RAM   | %d bytes | %d bytes | %d bytes | %d%% |\n" $RAM_USED   $RAM_MAX   $RAM_AVAIL   $RAM_PCT
+          } >> $GITHUB_STEP_SUMMARY
 
       - name: Generate synthetic ESP8266 partition table
         run: |
@@ -298,6 +320,10 @@ jobs:
             --arg created "$CREATED_ISO" \
             --arg bootloader_addr "${{ matrix.bootloader_addr }}" \
             --argjson files "$FILES_JSON" \
+            --argjson flash_used "${{ env.FLASH_USED }}" \
+            --argjson flash_max "${{ env.FLASH_MAX }}" \
+            --argjson ram_used "${{ env.RAM_USED }}" \
+            --argjson ram_max "${{ env.RAM_MAX }}" \
             '{
               class: $class,
               product_id: $product_id,
@@ -309,7 +335,11 @@ jobs:
               commit: $commit,
               created: $created,
               bootloader_addr: $bootloader_addr,
-              files: $files
+              files: $files,
+              memory: {
+                flash: { used: $flash_used, available: $flash_max },
+                ram:   { used: $ram_used,   available: $ram_max }
+              }
             }')
 
           if [ -n "$RELEASE_URL" ]; then
