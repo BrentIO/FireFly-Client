@@ -194,13 +194,13 @@ jobs:
               arduino-cli compile \
                 -b "${{ matrix.fqbn }}" ./${APPLICATION} \
                 --warnings more --clean \
-                --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DFIREFLY_CLOUD_API_ROOT=\"${FIREFLY_CLOUD_API_ROOT}\" -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -DVERSION=\"9999.99.99\" -I${{ github.workspace }}" \
+                --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DFIREFLY_CLOUD_API_ROOT=\"${FIREFLY_CLOUD_API_ROOT}\" -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -DVERSION=\"9999.99.99\" -DCOMMIT_HASH=\"${COMMIT_HASH}\" -I${{ github.workspace }}" \
                 --output-dir "$OUTDIR"
             else
               arduino-cli compile \
                 -b "${{ matrix.fqbn }}" ./${APPLICATION} \
                 --warnings more --clean \
-                --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -DVERSION=\"9999.99.99\" -I${{ github.workspace }}" \
+                --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -DVERSION=\"9999.99.99\" -DCOMMIT_HASH=\"${COMMIT_HASH}\" -I${{ github.workspace }}" \
                 --output-dir "$OUTDIR"
             fi
           else
