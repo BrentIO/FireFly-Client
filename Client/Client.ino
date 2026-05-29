@@ -19,7 +19,7 @@
 #define APPLICATION      "Client"
 
 #ifndef VERSION
-    #define VERSION "DEBUG"
+    #define VERSION "9999.99.99"
 #endif
 
 #ifndef COMMIT_HASH

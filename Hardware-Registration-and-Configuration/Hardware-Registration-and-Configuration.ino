@@ -35,7 +35,7 @@
 #define DEVICE_CLASS       "CLIENT"
 
 #ifndef VERSION
-    #define VERSION "DEBUG"
+    #define VERSION "9999.99.99"
 #endif
 
 #ifndef COMMIT_HASH
