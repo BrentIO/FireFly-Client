@@ -19,11 +19,11 @@
 #define APPLICATION      "Client"
 
 #ifndef VERSION
-    #define VERSION "DEBUG"
+    #error "VERSION must be specified for a build."
 #endif
 
 #ifndef COMMIT_HASH
-    #define COMMIT_HASH ""
+    #error "COMMIT_HASH must be specified for a build."
 #endif
 
 // EXCESSIVE flash: 3 flashes, 100ms on / 100ms off — non-blocking

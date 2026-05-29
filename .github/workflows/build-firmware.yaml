@@ -60,7 +60,7 @@ jobs:
             echo "VERSION=$TAG" >> $GITHUB_ENV
             echo "Release tag: $TAG"
 
-            if [[ ! "$TAG" =~ ^[0-9]{4}\.(0[1-9]|1[0-2])\.[0-9]{2}$ ]]; then
+            if [[ ! "$TAG" =~ ^[0-9]{4}\.(0[1-9]|1[0-2])\.(0[1-9]|[1-9][0-9])$ ]]; then
               echo "❌ Invalid tag format. Expected YYYY.MM.bb"
               exit 1
             fi
@@ -194,13 +194,13 @@ jobs:
               arduino-cli compile \
                 -b "${{ matrix.fqbn }}" ./${APPLICATION} \
                 --warnings more --clean \
-                --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DFIREFLY_CLOUD_API_ROOT=\"${FIREFLY_CLOUD_API_ROOT}\" -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -I${{ github.workspace }}" \
+                --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DFIREFLY_CLOUD_API_ROOT=\"${FIREFLY_CLOUD_API_ROOT}\" -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -DVERSION=\"9999.99.99\" -DCOMMIT_HASH=\"${COMMIT_HASH}\" -I${{ github.workspace }}" \
                 --output-dir "$OUTDIR"
             else
               arduino-cli compile \
                 -b "${{ matrix.fqbn }}" ./${APPLICATION} \
                 --warnings more --clean \
-                --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -I${{ github.workspace }}" \
+                --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -DVERSION=\"9999.99.99\" -DCOMMIT_HASH=\"${COMMIT_HASH}\" -I${{ github.workspace }}" \
                 --output-dir "$OUTDIR"
             fi
           else

@@ -64,7 +64,7 @@ jobs:
           arduino-cli compile \
             -b "${{ env.FQBN }}" ./Client \
             --warnings more --clean \
-            --build-property "build.extra_flags=-DPRODUCT_HEX=${{ env.PRODUCT_HEX }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -I${{ github.workspace }}"
+            --build-property "build.extra_flags=-DPRODUCT_HEX=${{ env.PRODUCT_HEX }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -DVERSION=\"9999.99.99\" -DCOMMIT_HASH=\"${{ github.sha }}\" -I${{ github.workspace }}"
 
       - name: Fetch TLS certificate for FIREFLY_CLOUD_API_ROOT
         run: |
@@ -119,4 +119,4 @@ jobs:
           arduino-cli compile \
             -b "${{ env.FQBN }}" ./Hardware-Registration-and-Configuration \
             --warnings more --clean \
-            --build-property "build.extra_flags=-DPRODUCT_HEX=${{ env.PRODUCT_HEX }} -DFIREFLY_CLOUD_API_ROOT=\"${{ env.FIREFLY_CLOUD_API_ROOT }}\" -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -I${{ github.workspace }}"
+            --build-property "build.extra_flags=-DPRODUCT_HEX=${{ env.PRODUCT_HEX }} -DFIREFLY_CLOUD_API_ROOT=\"${{ env.FIREFLY_CLOUD_API_ROOT }}\" -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -DVERSION=\"9999.99.99\" -DCOMMIT_HASH=\"${{ github.sha }}\" -I${{ github.workspace }}"

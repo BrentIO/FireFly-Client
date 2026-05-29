@@ -31,15 +31,16 @@
 #  endif
 #endif
 
-#define HW_REG_APPLICATION "Hardware-Registration-and-Configuration"
-#define DEVICE_CLASS       "CLIENT"
+#define APPLICATION      "HW-Reg"
+#define APPLICATION_NAME "Hardware Registration and Configuration"
+#define DEVICE_CLASS     "CLIENT"
 
 #ifndef VERSION
-    #define VERSION "DEBUG"
+    #error "VERSION must be specified for a build."
 #endif
 
 #ifndef COMMIT_HASH
-    #define COMMIT_HASH ""
+    #error "COMMIT_HASH must be specified for a build."
 #endif
 
 static AsyncWebServer httpServer(80);
@@ -281,7 +282,7 @@ static void handlePostRegistration(AsyncWebServerRequest* req, JsonVariant& body
     payload["product_hex"]             = hexStr;
     payload["device_class"]            = DEVICE_CLASS;
     payload["public_key"]              = pubKeyB64;
-    payload["registering_application"] = HW_REG_APPLICATION;
+    payload["registering_application"] = APPLICATION_NAME;
     payload["registering_version"]     = VERSION;
 
     JsonObject mcu = payload["mcu"].to<JsonObject>();
@@ -412,7 +413,7 @@ static void handleGetNetwork(AsyncWebServerRequest* req) {
 
 static void handleGetVersion(AsyncWebServerRequest* req) {
     JsonDocument doc;
-    doc["application"] = HW_REG_APPLICATION;
+    doc["application"] = APPLICATION_NAME;
     doc["product_hex"] = productHexStr();
     String out;
     serializeJson(doc, out);
