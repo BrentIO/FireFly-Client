@@ -13,6 +13,17 @@ on:
         options:
           - production
           - dev
+      core_debug_level:
+        type: choice
+        description: "Select CORE_DEBUG_LEVEL (release builds always use None)"
+        default: Debug
+        options:
+          - None
+          - Error
+          - Warn
+          - Info
+          - Debug
+          - Verbose
 
 env:
   ARTIFACT_ROOT: /home/runner/artifacts
@@ -190,32 +201,46 @@ jobs:
 
           if [ "$VERSION" = "DEBUG" ]; then
             echo "Building DEBUG firmware ($BRANCH)"
+
+            case "${{ inputs.core_debug_level }}" in
+              None)    CORE_DEBUG_LEVEL=0 ;;
+              Error)   CORE_DEBUG_LEVEL=1 ;;
+              Warn)    CORE_DEBUG_LEVEL=2 ;;
+              Info)    CORE_DEBUG_LEVEL=3 ;;
+              Verbose) CORE_DEBUG_LEVEL=5 ;;
+              *)       CORE_DEBUG_LEVEL=4 ;;
+            esac
+            echo "CORE_DEBUG_LEVEL=$CORE_DEBUG_LEVEL"
+
             if [ "$APPLICATION" = "Hardware-Registration-and-Configuration" ]; then
               arduino-cli compile \
                 -b "${{ matrix.fqbn }}" ./${APPLICATION} \
                 --warnings more --clean \
-                --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DFIREFLY_CLOUD_API_ROOT=\"${FIREFLY_CLOUD_API_ROOT}\" -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -DVERSION=\"9999.99.99\" -DCOMMIT_HASH=\"${COMMIT_HASH}\" -I${{ github.workspace }}" \
+                --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DFIREFLY_CLOUD_API_ROOT=\"${FIREFLY_CLOUD_API_ROOT}\" -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=${CORE_DEBUG_LEVEL} -DVERSION=\"9999.99.99\" -DCOMMIT_HASH=\"${COMMIT_HASH}\" -I${{ github.workspace }}" \
                 --output-dir "$OUTDIR" 2>&1 | tee /tmp/compile_output.txt
             else
               arduino-cli compile \
                 -b "${{ matrix.fqbn }}" ./${APPLICATION} \
                 --warnings more --clean \
-                --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=4 -DVERSION=\"9999.99.99\" -DCOMMIT_HASH=\"${COMMIT_HASH}\" -I${{ github.workspace }}" \
+                --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=${CORE_DEBUG_LEVEL} -DVERSION=\"9999.99.99\" -DCOMMIT_HASH=\"${COMMIT_HASH}\" -I${{ github.workspace }}" \
                 --output-dir "$OUTDIR" 2>&1 | tee /tmp/compile_output.txt
             fi
           else
             echo "Building RELEASE firmware ($VERSION)"
+            CORE_DEBUG_LEVEL=0
+            echo "CORE_DEBUG_LEVEL=$CORE_DEBUG_LEVEL"
+
             if [ "$APPLICATION" = "Hardware-Registration-and-Configuration" ]; then
               arduino-cli compile \
                 -b "${{ matrix.fqbn }}" ./${APPLICATION} \
                 --warnings more --clean \
-                --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DFIREFLY_CLOUD_API_ROOT=\"${FIREFLY_CLOUD_API_ROOT}\" -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=0 -DVERSION=\"${VERSION}\" -DCOMMIT_HASH=\"${COMMIT_HASH}\" -I${{ github.workspace }}" \
+                --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DFIREFLY_CLOUD_API_ROOT=\"${FIREFLY_CLOUD_API_ROOT}\" -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=${CORE_DEBUG_LEVEL} -DVERSION=\"${VERSION}\" -DCOMMIT_HASH=\"${COMMIT_HASH}\" -I${{ github.workspace }}" \
                 --output-dir "$OUTDIR" 2>&1 | tee /tmp/compile_output.txt
             else
               arduino-cli compile \
                 -b "${{ matrix.fqbn }}" ./${APPLICATION} \
                 --warnings more --clean \
-                --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=0 -DVERSION=\"${VERSION}\" -DCOMMIT_HASH=\"${COMMIT_HASH}\" -I${{ github.workspace }}" \
+                --build-property "build.extra_flags=-DPRODUCT_HEX=${{ matrix.product_hex }} -DDISABLE_ALL_LIBRARY_WARNINGS -DCORE_DEBUG_LEVEL=${CORE_DEBUG_LEVEL} -DVERSION=\"${VERSION}\" -DCOMMIT_HASH=\"${COMMIT_HASH}\" -I${{ github.workspace }}" \
                 --output-dir "$OUTDIR" 2>&1 | tee /tmp/compile_output.txt
             fi
           fi
