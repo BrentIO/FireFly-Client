@@ -11,8 +11,8 @@ on:
         type: choice
         description: "Select destination environment"
         options:
-          - production
           - dev
+          - production
       core_debug_level:
         type: choice
         description: "Select CORE_DEBUG_LEVEL (release builds always use None)"
