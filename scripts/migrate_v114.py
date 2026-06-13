@@ -34,7 +34,7 @@ NO_RESPONSE_TIMEOUT_SECS = 300  # 5 minutes after SENT
 
 DEVICES_FILE = "devices.json"
 
-RETAINED_SUBTOPICS = {"status", "ip", "firmware", "deviceName", "name", "uptime", "errorMessage"}
+RETAINED_SUBTOPICS = {"status", "ip", "firmware", "name", "uptime", "errorMessage"}
 
 
 # ---------------------------------------------------------------------------
@@ -44,6 +44,12 @@ RETAINED_SUBTOPICS = {"status", "ip", "firmware", "deviceName", "name", "uptime"
 def utcnow_iso() -> str:
     """Return current UTC time as an ISO 8601 string."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def mac_from_device_id(device_id: str) -> str:
+    """Convert a 12-char hex device ID to a colon-separated lowercase MAC address."""
+    d = device_id.lower()
+    return ":".join(d[i:i+2] for i in range(0, 12, 2))
 
 
 def load_devices_file(firmware_url: str) -> dict:
@@ -134,10 +140,8 @@ def run_discovery(args) -> dict:
                 raw[device_id] = {}
             if subtopic == "firmware":
                 raw[device_id]["firmware_version"] = payload
-            elif subtopic in ("deviceName", "name"):
-                # Prefer deviceName; fall back to name
-                if subtopic == "deviceName" or "name" not in raw[device_id]:
-                    raw[device_id]["name"] = payload
+            elif subtopic == "name":
+                raw[device_id]["name"] = payload
             elif subtopic == "ip":
                 raw[device_id]["ip"] = payload
 
@@ -162,11 +166,14 @@ def run_discovery(args) -> dict:
             if device_id in existing_ids:
                 # Update fields on existing entry but do not reset a terminal status
                 dev = find_device(data, device_id)
+                if "mac_address" not in dev:
+                    dev["mac_address"] = mac_from_device_id(device_id)
                 for k, v in fields.items():
                     dev[k] = v
             else:
                 data["devices"].append({
                     "device_id": device_id,
+                    "mac_address": mac_from_device_id(device_id),
                     "name": fields.get("name", ""),
                     "ip": fields.get("ip", ""),
                     "firmware_version": fields.get("firmware_version", ""),
