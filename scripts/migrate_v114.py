@@ -34,7 +34,7 @@ NO_RESPONSE_TIMEOUT_SECS = 300  # 5 minutes after SENT
 
 DEVICES_FILE = "devices.json"
 
-RETAINED_SUBTOPICS = {"status", "ip", "firmware", "deviceName", "name", "uptime", "errorMessage"}
+RETAINED_SUBTOPICS = {"status", "ip", "firmware", "name", "uptime", "errorMessage"}
 
 
 # ---------------------------------------------------------------------------
@@ -140,10 +140,8 @@ def run_discovery(args) -> dict:
                 raw[device_id] = {}
             if subtopic == "firmware":
                 raw[device_id]["firmware_version"] = payload
-            elif subtopic in ("deviceName", "name"):
-                # Prefer deviceName; fall back to name
-                if subtopic == "deviceName" or "name" not in raw[device_id]:
-                    raw[device_id]["name"] = payload
+            elif subtopic == "name":
+                raw[device_id]["name"] = payload
             elif subtopic == "ip":
                 raw[device_id]["ip"] = payload
 
