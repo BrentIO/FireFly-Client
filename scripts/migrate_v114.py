@@ -46,6 +46,12 @@ def utcnow_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def mac_from_device_id(device_id: str) -> str:
+    """Convert a 12-char hex device ID to a colon-separated lowercase MAC address."""
+    d = device_id.lower()
+    return ":".join(d[i:i+2] for i in range(0, 12, 2))
+
+
 def load_devices_file(firmware_url: str) -> dict:
     """Load an existing devices.json or return a fresh structure."""
     if os.path.exists(DEVICES_FILE):
@@ -162,11 +168,14 @@ def run_discovery(args) -> dict:
             if device_id in existing_ids:
                 # Update fields on existing entry but do not reset a terminal status
                 dev = find_device(data, device_id)
+                if "mac_address" not in dev:
+                    dev["mac_address"] = mac_from_device_id(device_id)
                 for k, v in fields.items():
                     dev[k] = v
             else:
                 data["devices"].append({
                     "device_id": device_id,
+                    "mac_address": mac_from_device_id(device_id),
                     "name": fields.get("name", ""),
                     "ip": fields.get("ip", ""),
                     "firmware_version": fields.get("firmware_version", ""),
