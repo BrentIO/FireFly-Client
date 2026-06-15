@@ -7,6 +7,7 @@
 #include <ESP8266HTTPClient.h>
 #include <ESP8266httpUpdate.h>
 #include <WiFiClientSecure.h>
+#include <time.h>
 #define MQTT_MAX_PACKET_SIZE 4096
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
@@ -252,6 +253,17 @@ void loop() {
     mqttClient.loop();
 
     unsigned long now = millis();
+
+    if (bootTime == 0) {
+        time_t nowEpoch = time(nullptr);
+        if (nowEpoch > 1577836800L) {  // sanity: after 2020-01-01
+            bootTime = nowEpoch - (time_t)(now / 1000);
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%lu", (unsigned long)bootTime);
+            mqttClient.publish(buildTopic(MQTT_TIME_START_TOPIC).c_str(), buf, true);
+        }
+    }
+
     if (bootTime > 0 && lastOtaCheck == 0 && now >= OTA_BOOT_DELAY_MS) {
         checkOta();
     } else if (lastOtaCheck > 0 && now - lastOtaCheck >= OTA_CHECK_INTERVAL_MS) {
@@ -582,6 +594,7 @@ void connectWifi() {
     lastWifiAttempt = millis();
     WiFi.mode(WIFI_STA);
     WiFi.begin(cfg.wifiSsid.c_str(), cfg.wifiPassword.c_str());
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
 }
 
 // ─── MQTT ─────────────────────────────────────────────────────────────────────
@@ -627,10 +640,6 @@ void connectMqtt() {
 
     publishTelemetry();
     publishAutoDiscovery();
-
-    if (bootTime == 0) {
-        bootTime = millis() / 1000;
-    }
 
     for (int i = 0; i < cfg.ledCount; i++) {
         if (cfg.leds[i].portId.length() == 0) continue;
@@ -927,8 +936,10 @@ void publishTelemetry() {
     snprintf(buf, sizeof(buf), "%d", errorCount);
     mqttClient.publish(buildTopic(MQTT_COUNT_ERRORS_TOPIC).c_str(), buf, true);
 
-    snprintf(buf, sizeof(buf), "%lu", (unsigned long)bootTime);
-    mqttClient.publish(buildTopic(MQTT_TIME_START_TOPIC).c_str(), buf, true);
+    if (bootTime > 0) {
+        snprintf(buf, sizeof(buf), "%lu", (unsigned long)bootTime);
+        mqttClient.publish(buildTopic(MQTT_TIME_START_TOPIC).c_str(), buf, true);
+    }
 
     snprintf(buf, sizeof(buf), "%d", (int)WiFi.RSSI());
     mqttClient.publish(buildTopic(MQTT_RSSI_TOPIC).c_str(), buf, false);
@@ -995,7 +1006,8 @@ void publishAutoDiscovery() {
 
     publishSensor("ip-address",              "IP Address",              buildTopic(MQTT_IP_ADDRESS_TOPIC).c_str(),              "mdi:ip");
     publishSensor("mac-address",             "MAC Address",             buildTopic(MQTT_MAC_ADDRESS_TOPIC).c_str(),             "mdi:ethernet");
-    publishSensor("time-start",              "Boot Time",               buildTopic(MQTT_TIME_START_TOPIC).c_str(),              "mdi:clock-start");
+    publishSensor("time-start",              "Boot Time",               buildTopic(MQTT_TIME_START_TOPIC).c_str(),              "mdi:clock-start",
+                  "timestamp", nullptr, nullptr, true, "{{ ( value | int ) | timestamp_local }}");
     publishSensor("count-errors",            "Error Count",             buildTopic(MQTT_COUNT_ERRORS_TOPIC).c_str(),            "mdi:alert");
     publishSensor("cert",                    "Certificate Fingerprint", buildTopic(MQTT_CERT_STATE_TOPIC).c_str(),              "mdi:certificate");
     publishSensor("rssi",                    "RSSI",                    buildTopic(MQTT_RSSI_TOPIC).c_str(),                    "mdi:wifi",   "signal_strength", "dBm", "measurement");
