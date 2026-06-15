@@ -54,19 +54,23 @@
 
 // ─── MQTT topic patterns ──────────────────────────────────────────────────────
 
-#define MQTT_AVAILABILITY_TOPIC    "FireFly/%s/availability"
-#define MQTT_TIME_START_TOPIC      "FireFly/%s/time-start/state"
-#define MQTT_IP_ADDRESS_TOPIC      "FireFly/%s/ip-address/state"
-#define MQTT_MAC_ADDRESS_TOPIC     "FireFly/%s/mac-address/state"
-#define MQTT_COUNT_ERRORS_TOPIC    "FireFly/%s/count-errors/state"
-#define MQTT_UPDATE_STATE_TOPIC    "FireFly/%s/update/state"
-#define MQTT_UPDATE_SET_TOPIC      "FireFly/%s/update/set"
-#define MQTT_INPUT_STATE_TOPIC     "FireFly/inputs/%s/channels/%d/state"
-#define MQTT_LED_BRIGHTNESS_TOPIC  "FireFly/%s/leds/brightness/set"
-#define MQTT_CERT_STATE_TOPIC             "FireFly/%s/cert/state"
-#define MQTT_CERT_BROADCAST_TOPIC         "FireFly/clients/cert/state"
-#define MQTT_TAG_SET_TOPIC                "FireFly/tag/%s/set"
-#define MQTT_CLIENTS_BRIGHTNESS_TOPIC     "FireFly/clients/leds/brightness/set"
+#define MQTT_AVAILABILITY_TOPIC              "FireFly/%s/availability"
+#define MQTT_TIME_START_TOPIC                "FireFly/%s/time-start/state"
+#define MQTT_IP_ADDRESS_TOPIC                "FireFly/%s/ip-address/state"
+#define MQTT_MAC_ADDRESS_TOPIC               "FireFly/%s/mac-address/state"
+#define MQTT_COUNT_ERRORS_TOPIC              "FireFly/%s/count-errors/state"
+#define MQTT_RSSI_TOPIC                      "FireFly/%s/rssi/state"
+#define MQTT_UPTIME_TOPIC                    "FireFly/%s/uptime/state"
+#define MQTT_HEAP_FREE_TOPIC                 "FireFly/%s/heap-free/state"
+#define MQTT_HEAP_LARGEST_FREE_BLOCK_TOPIC   "FireFly/%s/heap-largest-free-block/state"
+#define MQTT_UPDATE_STATE_TOPIC              "FireFly/%s/update/state"
+#define MQTT_UPDATE_SET_TOPIC                "FireFly/%s/update/set"
+#define MQTT_INPUT_STATE_TOPIC               "FireFly/inputs/%s/channels/%d/state"
+#define MQTT_LED_BRIGHTNESS_TOPIC            "FireFly/%s/leds/brightness/set"
+#define MQTT_CERT_STATE_TOPIC                "FireFly/%s/cert/state"
+#define MQTT_CERT_BROADCAST_TOPIC            "FireFly/clients/cert/state"
+#define MQTT_TAG_SET_TOPIC                   "FireFly/tag/%s/set"
+#define MQTT_CLIENTS_BRIGHTNESS_TOPIC        "FireFly/clients/leds/brightness/set"
 
 // ─── Data structures ──────────────────────────────────────────────────────────
 
@@ -138,6 +142,9 @@ unsigned long lastOtaCheck      = 0;
 unsigned long lastMqttAttempt   = 0;
 unsigned long lastWifiAttempt   = 0;
 unsigned long lastProvScan      = 0;
+unsigned long lastTelemetryAt   = 0;
+
+#define TELEMETRY_INTERVAL_MS 300000UL  // re-publish RSSI, heap, uptime every 5 minutes
 
 // Unprovisioned LED rotation state
 uint8_t       unProvRotateIndex = 0;
@@ -249,6 +256,10 @@ void loop() {
         checkOta();
     } else if (lastOtaCheck > 0 && now - lastOtaCheck >= OTA_CHECK_INTERVAL_MS) {
         checkOta();
+    }
+
+    if (lastTelemetryAt > 0 && now - lastTelemetryAt >= TELEMETRY_INTERVAL_MS) {
+        publishTelemetry();
     }
 
     for (int i = 0; i < cfg.ledCount; i++) {
@@ -907,13 +918,30 @@ String buildTopic(const char* pattern) {
 // ─── Telemetry ───────────────────────────────────────────────────────────────
 
 void publishTelemetry() {
+    lastTelemetryAt = millis();
+
     mqttClient.publish(buildTopic(MQTT_IP_ADDRESS_TOPIC).c_str(),  WiFi.localIP().toString().c_str(), true);
     mqttClient.publish(buildTopic(MQTT_MAC_ADDRESS_TOPIC).c_str(), WiFi.macAddress().c_str(), true);
+
     char buf[16];
     snprintf(buf, sizeof(buf), "%d", errorCount);
     mqttClient.publish(buildTopic(MQTT_COUNT_ERRORS_TOPIC).c_str(), buf, true);
+
     snprintf(buf, sizeof(buf), "%lu", (unsigned long)bootTime);
     mqttClient.publish(buildTopic(MQTT_TIME_START_TOPIC).c_str(), buf, true);
+
+    snprintf(buf, sizeof(buf), "%d", (int)WiFi.RSSI());
+    mqttClient.publish(buildTopic(MQTT_RSSI_TOPIC).c_str(), buf, false);
+
+    snprintf(buf, sizeof(buf), "%lu", millis() / 1000UL);
+    mqttClient.publish(buildTopic(MQTT_UPTIME_TOPIC).c_str(), buf, false);
+
+    snprintf(buf, sizeof(buf), "%u", (unsigned int)ESP.getFreeHeap());
+    mqttClient.publish(buildTopic(MQTT_HEAP_FREE_TOPIC).c_str(), buf, true);
+
+    snprintf(buf, sizeof(buf), "%lu", (unsigned long)ESP.getMaxFreeBlockSize());
+    mqttClient.publish(buildTopic(MQTT_HEAP_LARGEST_FREE_BLOCK_TOPIC).c_str(), buf, true);
+
     if (certFingerprint.length() > 0) {
         mqttClient.publish(buildTopic(MQTT_CERT_STATE_TOPIC).c_str(), certFingerprint.c_str(), true);
     }
@@ -942,25 +970,38 @@ void publishAutoDiscovery() {
         if (certExpiration.length() > 0)   device["cert_expiration"]  = certExpiration;
     };
 
-    auto publishSensor = [&](const char* id, const char* name, const char* stateTopic, const char* icon) {
+    auto publishSensor = [&](const char* id, const char* name, const char* stateTopic, const char* icon,
+                              const char* deviceClass = nullptr, const char* unit = nullptr,
+                              const char* stateClass = nullptr, bool enabledByDefault = true,
+                              const char* valueTemplate = nullptr) {
         String discTopic = "homeassistant/sensor/FireFly-" + uuid + "-" + id + "/config";
         JsonDocument doc;
         doc["unique_id"]          = "FireFly-" + uuid + "-" + id;
         doc["name"]               = name;
         doc["state_topic"]        = stateTopic;
         doc["availability_topic"] = avail;
-        if (icon) doc["icon"]     = icon;
+        doc["entity_category"]    = "diagnostic";
+        if (icon)              doc["icon"]               = icon;
+        if (deviceClass)       doc["device_class"]        = deviceClass;
+        if (unit)              doc["unit_of_measurement"] = unit;
+        if (stateClass)        doc["state_class"]         = stateClass;
+        if (!enabledByDefault) doc["enabled_by_default"]  = false;
+        if (valueTemplate)     doc["value_template"]      = valueTemplate;
         addDevice(doc);
         String payload;
         serializeJson(doc, payload);
         mqttClient.publish(discTopic.c_str(), payload.c_str(), true);
     };
 
-    publishSensor("ip-address",  "IP Address",             buildTopic(MQTT_IP_ADDRESS_TOPIC).c_str(),  "mdi:ip");
-    publishSensor("mac-address", "MAC Address",            buildTopic(MQTT_MAC_ADDRESS_TOPIC).c_str(), "mdi:ethernet");
-    publishSensor("time-start",  "Boot Time",              buildTopic(MQTT_TIME_START_TOPIC).c_str(),  "mdi:clock-start");
-    publishSensor("count-errors","Error Count",            buildTopic(MQTT_COUNT_ERRORS_TOPIC).c_str(),"mdi:alert-circle");
-    publishSensor("cert",        "Certificate Fingerprint",buildTopic(MQTT_CERT_STATE_TOPIC).c_str(),  "mdi:certificate");
+    publishSensor("ip-address",              "IP Address",              buildTopic(MQTT_IP_ADDRESS_TOPIC).c_str(),              "mdi:ip");
+    publishSensor("mac-address",             "MAC Address",             buildTopic(MQTT_MAC_ADDRESS_TOPIC).c_str(),             "mdi:ethernet");
+    publishSensor("time-start",              "Boot Time",               buildTopic(MQTT_TIME_START_TOPIC).c_str(),              "mdi:clock-start");
+    publishSensor("count-errors",            "Error Count",             buildTopic(MQTT_COUNT_ERRORS_TOPIC).c_str(),            "mdi:alert");
+    publishSensor("cert",                    "Certificate Fingerprint", buildTopic(MQTT_CERT_STATE_TOPIC).c_str(),              "mdi:certificate");
+    publishSensor("rssi",                    "RSSI",                    buildTopic(MQTT_RSSI_TOPIC).c_str(),                    "mdi:wifi",   "signal_strength", "dBm", "measurement");
+    publishSensor("uptime",                  "Uptime",                  buildTopic(MQTT_UPTIME_TOPIC).c_str(),                  "mdi:timer-outline", "duration", "s", "measurement");
+    publishSensor("heap-free",               "Heap Free",               buildTopic(MQTT_HEAP_FREE_TOPIC).c_str(),               "mdi:memory", "data_size",       "B",   "measurement", false);
+    publishSensor("heap-largest-free-block", "Heap Largest Free Block", buildTopic(MQTT_HEAP_LARGEST_FREE_BLOCK_TOPIC).c_str(), "mdi:memory", "data_size",       "B",   "measurement", false);
 
     // OTA update entity
     {
