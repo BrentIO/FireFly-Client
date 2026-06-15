@@ -264,6 +264,7 @@ void runProvisioningMode() {
 
     // Scan for FireFly-Provisioning SoftAP and complete provisioning.
     // Password is derived from the Controller's BSSID via nibble-interleave algorithm.
+    // Flow: POST /api/provisioning/token → GET /api/clients/{uuid} → GET /api/provisioning/certs
 
     while (true) {
 
@@ -299,18 +300,35 @@ void runProvisioningMode() {
             WiFiClient client;
             HTTPClient  http;
 
-            // Fetch nonce
-            http.begin(client, "http://192.168.4.1/api/provisioning/nonce");
-            int code = http.GET();
-            if (code != 200) { http.end(); break; }
-            String nonce = http.getString();
-            http.end();
-            nonce.trim();
+            // Step 1: exchange UUID + MAC for a short-lived provisioning token
+            String mac = WiFi.macAddress();
+            mac.toLowerCase();
 
-            // Fetch config
-            http.begin(client, "http://192.168.4.1/api/provisioning/client");
-            http.addHeader("mac-address", WiFi.macAddress());
-            http.addHeader("x-nonce", nonce);
+            JsonDocument tokenReqDoc;
+            tokenReqDoc["uuid"]        = deviceIdentity.data.uuid;
+            tokenReqDoc["mac_address"] = mac;
+            String tokenReqBody;
+            serializeJson(tokenReqDoc, tokenReqBody);
+
+            http.begin(client, "http://192.168.4.1/api/provisioning/token");
+            http.addHeader("Content-Type", "application/json");
+            int code = http.POST(tokenReqBody);
+            if (code != 200) { http.end(); break; }
+
+            String tokenPayload = http.getString();
+            http.end();
+
+            JsonDocument tokenDoc;
+            if (deserializeJson(tokenDoc, tokenPayload) != DeserializationError::Ok) break;
+            if (tokenDoc["token"].isNull()) break;
+
+            uint32_t provToken = tokenDoc["token"].as<uint32_t>();
+            char provTokenStr[12];
+            snprintf(provTokenStr, sizeof(provTokenStr), "%lu", (unsigned long)provToken);
+
+            // Step 2: fetch this client's configuration record
+            http.begin(client, "http://192.168.4.1/api/clients/" + String(deviceIdentity.data.uuid));
+            http.addHeader("provisioning-token", provTokenStr);
             code = http.GET();
             if (code != 200) { http.end(); break; }
             String configJson = http.getString();
@@ -318,16 +336,16 @@ void runProvisioningMode() {
 
             if (!saveConfig(configJson)) break;
 
-            // Fetch CA certificate — macAddress auth only (cert is not sensitive)
+            // Step 3: fetch the client CA certificate (404 = none designated; continue without)
             http.begin(client, "http://192.168.4.1/api/provisioning/certs");
-            http.addHeader("mac-address", WiFi.macAddress());
+            http.addHeader("provisioning-token", provTokenStr);
             code = http.GET();
             if (code == 200) {
                 String certJson = http.getString();
-                JsonDocument doc;
-                if (deserializeJson(doc, certJson) == DeserializationError::Ok) {
-                    String fp  = doc["fingerprint"].as<String>();
-                    String pem = doc["pem"].as<String>();
+                JsonDocument certDoc;
+                if (deserializeJson(certDoc, certJson) == DeserializationError::Ok) {
+                    String fp  = certDoc["fingerprint"].as<String>();
+                    String pem = certDoc["pem"].as<String>();
                     if (fp.length() > 0 && pem.length() > 0) {
                         File f = LittleFS.open(CERT_FILE, "w");
                         if (f) { f.print(pem); f.close(); }
