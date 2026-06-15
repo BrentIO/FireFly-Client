@@ -72,9 +72,7 @@
     managerDeviceIdentity deviceIdentity;
 #endif
 
-/* LED channel index → GPIO pin mapping */
-static const uint8_t LED_PINS[LED_CHANNEL_COUNT] = {
-    LED_CH1, LED_CH2, LED_CH3, LED_CH4, LED_CH5, LED_CH6
-};
+/* LED channel index → GPIO pin mapping; initializer list declared in device header as LED_CHANNEL_PINS */
+static const uint8_t LED_PINS[LED_CHANNEL_COUNT] = LED_CHANNEL_PINS;
 
 #endif // hardware_definitions_h
