@@ -72,9 +72,13 @@
     managerDeviceIdentity deviceIdentity;
 #endif
 
-/* LED channel index → GPIO pin mapping */
-static const uint8_t LED_PINS[LED_CHANNEL_COUNT] = {
-    LED_CH1, LED_CH2, LED_CH3, LED_CH4, LED_CH5, LED_CH6
-};
+/* LED channel index → GPIO pin mapping; initializer list declared in device header as LED_CHANNEL_PINS */
+static const uint8_t LED_PINS[LED_CHANNEL_COUNT] = LED_CHANNEL_PINS;
+
+/* Compile-time guard: fails if LED_CHANNEL_PINS has fewer elements than LED_CHANNEL_COUNT.
+   (More elements is already a hard compiler error from the fixed-size array declaration above.) */
+static const uint8_t _led_channel_pins_count_check[] = LED_CHANNEL_PINS;
+static_assert(sizeof(_led_channel_pins_count_check) == LED_CHANNEL_COUNT,
+              "LED_CHANNEL_PINS element count does not match LED_CHANNEL_COUNT");
 
 #endif // hardware_definitions_h
