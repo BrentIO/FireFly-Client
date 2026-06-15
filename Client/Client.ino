@@ -911,7 +911,7 @@ void publishAutoDiscovery() {
     auto addDevice = [&](JsonDocument& doc) {
         JsonObject device = doc["device"].to<JsonObject>();
         JsonArray  ids    = device["identifiers"].to<JsonArray>();
-        ids.add(uuid);
+        ids.add("FireFly-" + uuid);
         device["name"]          = cfg.name;
         device["manufacturer"]  = HARDWARE_MANUFACTURER_NAME;
         device["model"]         = APPLICATION_NAME;

@@ -907,7 +907,7 @@ components:
           type: array
           items:
             type: string
-          description: Single-element array containing the bare UUID (no prefix)
+          description: Single-element array containing the device identifier in the format "FireFly-{uuid}", matching the identifier the Controller publishes in its input-channel auto-discovery payloads for paired ports so Home Assistant groups both sets of entities on a single device card
         name:
           type: string
           description: Human-friendly device name read from config.json
