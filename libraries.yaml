@@ -19,5 +19,5 @@ libraries:
     version: "v2.0.0"
     url: "https://github.com/ESP32Async/ESPAsyncTCP"
   - name: "ESPAsyncWebServer"
-    version: "v3.11.0"
+    version: "v3.11.1"
     url: "https://github.com/ESP32Async/ESPAsyncWebServer"
