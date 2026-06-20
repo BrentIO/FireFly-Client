@@ -287,7 +287,7 @@ void runProvisioningMode() {
 
     // Scan for FireFly-Provisioning SoftAP and complete provisioning.
     // Password is derived from the Controller's BSSID via nibble-interleave algorithm.
-    // Flow: POST /api/provisioning/token → GET /api/clients/{uuid} → GET /api/provisioning/certs
+    // Flow: POST /api/provisioning/token → GET /api/clients/{uuid} → GET /api/provisioning/certs/client
 
     while (true) {
 
@@ -360,7 +360,7 @@ void runProvisioningMode() {
             if (!saveConfig(configJson)) break;
 
             // Step 3: fetch the client CA certificate (404 = none designated; continue without)
-            http.begin(client, "http://192.168.4.1/api/provisioning/certs");
+            http.begin(client, "http://192.168.4.1/api/provisioning/certs/client");
             http.addHeader("provisioning-token", provTokenStr);
             code = http.GET();
             if (code == 200) {
