@@ -245,10 +245,10 @@ jobs:
             fi
           fi
 
-          FLASH_USED=$(grep "Sketch uses"          /tmp/compile_output.txt | sed 's/Sketch uses \([0-9]*\) bytes.*/\1/')
-          FLASH_MAX=$(grep  "Sketch uses"          /tmp/compile_output.txt | sed 's/.*Maximum is \([0-9]*\) bytes.*/\1/')
-          RAM_USED=$(grep   "Global variables use" /tmp/compile_output.txt | sed 's/Global variables use \([0-9]*\) bytes.*/\1/')
-          RAM_MAX=$(grep    "Global variables use" /tmp/compile_output.txt | sed 's/.*Maximum is \([0-9]*\) bytes.*/\1/')
+          FLASH_USED=$(grep "Code in flash"                  /tmp/compile_output.txt | sed 's/.*used \([0-9]*\) \/.*/\1/')
+          FLASH_MAX=$(grep  "Code in flash"                  /tmp/compile_output.txt | sed 's/.*\/ \([0-9]*\) bytes.*/\1/')
+          RAM_USED=$(grep   "Variables and constants in RAM" /tmp/compile_output.txt | sed 's/.*used \([0-9]*\) \/.*/\1/')
+          RAM_MAX=$(grep    "Variables and constants in RAM" /tmp/compile_output.txt | sed 's/.*\/ \([0-9]*\) bytes.*/\1/')
 
           echo "FLASH_USED=$FLASH_USED" >> $GITHUB_ENV
           echo "FLASH_MAX=$FLASH_MAX"   >> $GITHUB_ENV
