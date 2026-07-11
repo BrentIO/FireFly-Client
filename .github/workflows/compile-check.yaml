@@ -23,7 +23,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Read build variables
         run: |
@@ -38,7 +38,7 @@ jobs:
           echo "FQBN=$FQBN" >> $GITHUB_ENV
 
       - name: Install Arduino CLI
-        uses: arduino/setup-arduino-cli@v2
+        uses: arduino/setup-arduino-cli@81d310742121c928ea9c8bbd407b4217b432ae02 # v2
         with:
           version: 1.4.1
 
