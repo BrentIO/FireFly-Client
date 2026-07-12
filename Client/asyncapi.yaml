@@ -190,6 +190,22 @@ channels:
       haDiscoveryUpdate:
         $ref: "#/components/messages/haDiscoveryUpdate"
 
+  haDiscoveryFactoryReset:
+    address: "{haRoot}/button/FireFly-{uuid}-factory-reset/config"
+    description: >
+      Home Assistant MQTT discovery config for the remote factory reset button entity.
+      Published once after MQTT connect. Retained. Diagnostic category, disabled by default —
+      the action is destructive and only takes effect within 30 seconds of a physical
+      power-cycle (see the factoryResetSet channel).
+    parameters:
+      haRoot:
+        $ref: "#/components/parameters/haRoot"
+      uuid:
+        $ref: "#/components/parameters/uuid"
+    messages:
+      haDiscoveryFactoryReset:
+        $ref: "#/components/messages/haDiscoveryFactoryReset"
+
   ##########################################################
   ## Input state (subscribed from Controller)             ##
   ##########################################################
@@ -390,6 +406,15 @@ operations:
     description: Published once after MQTT connect. The retain flag is set.
     messages:
       - $ref: "#/channels/haDiscoveryUpdate/messages/haDiscoveryUpdate"
+
+  publishHaDiscoveryFactoryReset:
+    action: send
+    channel:
+      $ref: "#/channels/haDiscoveryFactoryReset"
+    summary: Publish Home Assistant discovery config for the remote factory reset button entity
+    description: Published once after MQTT connect. The retain flag is set.
+    messages:
+      - $ref: "#/channels/haDiscoveryFactoryReset/messages/haDiscoveryFactoryReset"
 
   ##########################################################
   ## Subscribe (client receives)                         ##
@@ -781,6 +806,14 @@ components:
       payload:
         $ref: "#/components/schemas/haDiscoveryUpdatePayload"
 
+    haDiscoveryFactoryReset:
+      name: haDiscoveryFactoryReset
+      title: Home Assistant Discovery — Remote Factory Reset Button Entity
+      summary: Home Assistant MQTT discovery payload for the remote factory reset button entity
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/haDiscoveryFactoryResetPayload"
+
   ##########################################################
   ## Schemas                                              ##
   ##########################################################
@@ -1043,5 +1076,41 @@ components:
         availability_topic:
           type: string
           description: MQTT topic used for availability (FireFly/{uuid}/availability)
+        device:
+          $ref: "#/components/schemas/haClientDevice"
+
+    haDiscoveryFactoryResetPayload:
+      type: object
+      description: >
+        Home Assistant MQTT discovery payload for the remote factory reset button entity.
+        Structure follows the Home Assistant MQTT button discovery specification.
+      properties:
+        unique_id:
+          type: string
+          description: Globally unique entity identifier (format "FireFly-{uuid}-factory-reset")
+        name:
+          type: string
+          description: Entity display name (always "Factory Reset")
+        command_topic:
+          type: string
+          description: MQTT topic where the factory reset command is sent (FireFly/{uuid}/factory_reset/set)
+        payload_press:
+          type: string
+          const: "do-factory-reset"
+          description: The payload that triggers a remote factory reset
+        availability_topic:
+          type: string
+          description: MQTT topic used for availability (FireFly/{uuid}/availability)
+        entity_category:
+          type: string
+          const: "diagnostic"
+          description: Home Assistant entity category
+        enabled_by_default:
+          type: boolean
+          const: false
+          description: Disabled by default — the action is destructive and must be explicitly enabled
+        icon:
+          type: string
+          description: MDI icon reference (always "mdi:file-document-remove-outline")
         device:
           $ref: "#/components/schemas/haClientDevice"

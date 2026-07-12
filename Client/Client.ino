@@ -1053,6 +1053,25 @@ void publishAutoDiscovery() {
         serializeJson(doc, payload);
         mqttClient.publish(discTopic.c_str(), payload.c_str(), true);
     }
+
+    // Factory reset entity: diagnostic, disabled by default — destructive, only actionable
+    // within FACTORY_RESET_MQTT_WINDOW_MS of a physical power-cycle (see mqttCallback()).
+    {
+        String discTopic = "homeassistant/button/FireFly-" + uuid + "-factory-reset/config";
+        JsonDocument doc;
+        doc["unique_id"]          = "FireFly-" + uuid + "-factory-reset";
+        doc["name"]               = "Factory Reset";
+        doc["command_topic"]      = buildTopic(MQTT_FACTORY_RESET_SET_TOPIC);
+        doc["payload_press"]      = "do-factory-reset";
+        doc["availability_topic"] = avail;
+        doc["entity_category"]    = "diagnostic";
+        doc["enabled_by_default"] = false;
+        doc["icon"]               = "mdi:file-document-remove-outline";
+        addDevice(doc);
+        String payload;
+        serializeJson(doc, payload);
+        mqttClient.publish(discTopic.c_str(), payload.c_str(), true);
+    }
 }
 
 // ─── OTA ─────────────────────────────────────────────────────────────────────
