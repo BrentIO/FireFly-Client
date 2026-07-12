@@ -137,6 +137,26 @@ channels:
         $ref: "#/components/messages/updateSet"
 
   ##########################################################
+  ## Remote factory reset                                 ##
+  ##########################################################
+
+  factoryResetSet:
+    address: "FireFly/{uuid}/factory_reset/set"
+    description: >
+      Command topic to remotely wipe provisioning state on units with no physically accessible
+      reset button. The client subscribes to this topic. Send the payload "do-factory-reset" to
+      trigger it. Only honored within 30 seconds of boot, so the command must coincide with an
+      actual power-cycle rather than being usable on demand at any time. Before subscribing on
+      every MQTT connect, the client publishes an empty retained payload to this topic to clear
+      any stale retained message, preventing a reset-on-every-boot loop.
+    parameters:
+      uuid:
+        $ref: "#/components/parameters/uuid"
+    messages:
+      factoryResetSet:
+        $ref: "#/components/messages/factoryResetSet"
+
+  ##########################################################
   ## Home Assistant auto-discovery                        ##
   ##########################################################
 
@@ -430,6 +450,22 @@ operations:
     messages:
       - $ref: "#/channels/updateSet/messages/updateSet"
 
+  receiveFactoryResetSet:
+    action: receive
+    channel:
+      $ref: "#/channels/factoryResetSet"
+    summary: Receive remote factory reset command
+    description: >
+      The client subscribes to this topic on MQTT connect, after first publishing an empty
+      retained payload to clear any stale retained message. Send "do-factory-reset" to wipe
+      provisioning state; any other payload, or a payload received more than 30 seconds after
+      boot, is ignored. On success the client deletes its stored WiFi/MQTT configuration and CA
+      certificate and reboots into unprovisioned/SoftAP-discovery mode — identical to holding the
+      physical factory-reset pin at boot. Reprovisioning still requires the Controller's
+      provisioning window to be opened separately.
+    messages:
+      - $ref: "#/channels/factoryResetSet/messages/factoryResetSet"
+
   receiveTagSet:
     action: receive
     channel:
@@ -654,6 +690,17 @@ components:
         - name: install
           payload: do-update
 
+    factoryResetSet:
+      name: factoryResetSet
+      title: Remote Factory Reset Command
+      summary: Command to remotely wipe provisioning state, honored only within 30s of boot
+      contentType: text/plain
+      payload:
+        $ref: "#/components/schemas/factoryResetSetPayload"
+      examples:
+        - name: factory-reset
+          payload: do-factory-reset
+
     inputState:
       name: inputState
       title: Input Channel State
@@ -838,6 +885,14 @@ components:
       description: Command payload to initiate a firmware OTA update
       enum:
         - do-update
+
+    factoryResetSetPayload:
+      type: string
+      description: >
+        Command payload to remotely wipe provisioning state. Only honored within 30 seconds of
+        boot.
+      enum:
+        - do-factory-reset
 
     ledBrightnessSetPayload:
       type: string
