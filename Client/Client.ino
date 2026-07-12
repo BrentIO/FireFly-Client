@@ -66,6 +66,7 @@
 #define MQTT_HEAP_LARGEST_FREE_BLOCK_TOPIC   "FireFly/%s/heap-largest-free-block/state"
 #define MQTT_UPDATE_STATE_TOPIC              "FireFly/%s/update/state"
 #define MQTT_UPDATE_SET_TOPIC                "FireFly/%s/update/set"
+#define MQTT_FACTORY_RESET_SET_TOPIC         "FireFly/%s/factory_reset/set"
 #define MQTT_INPUT_STATE_TOPIC               "FireFly/inputs/%s/channels/%d/state"
 #define MQTT_LED_BRIGHTNESS_TOPIC            "FireFly/%s/leds/brightness/set"
 #define MQTT_CERT_STATE_TOPIC                "FireFly/%s/cert/state"
@@ -154,6 +155,7 @@ unsigned long unProvRotateAt    = 0;
 // ─── Forward declarations ─────────────────────────────────────────────────────
 
 void   haltWithFlashCode(uint8_t shortBursts, uint8_t longBursts);
+void   wipeProvisioningAndRestart();
 void   runProvisioningMode();
 bool   loadConfig();
 bool   saveConfig(const String& json);
@@ -194,12 +196,7 @@ void setup() {
     pinMode(FACTORY_RESET_PIN, INPUT_PULLUP);
 
     if (digitalRead(FACTORY_RESET_PIN) == LOW) {
-        LittleFS.begin();
-        LittleFS.remove(CONFIG_FILE);
-        LittleFS.remove(CERT_FILE);
-        LittleFS.remove(CERT_FP_FILE);
-        LittleFS.end();
-        ESP.restart();
+        wipeProvisioningAndRestart();
     }
 
     if (!LittleFS.begin()) {
@@ -472,6 +469,17 @@ bool saveConfig(const String& json) {
     return true;
 }
 
+// Deletes all provisioning state and reboots into runProvisioningMode(). Shared by the
+// boot-time FACTORY_RESET_PIN check and the MQTT-triggered remote factory reset.
+void wipeProvisioningAndRestart() {
+    LittleFS.begin();
+    LittleFS.remove(CONFIG_FILE);
+    LittleFS.remove(CERT_FILE);
+    LittleFS.remove(CERT_FP_FILE);
+    LittleFS.end();
+    ESP.restart();
+}
+
 static String dnField(const uint8_t* dn, size_t len, uint8_t oidFinal) {
     // Scan for DER OID pattern {0x06, 0x03, 0x55, 0x04, oidFinal} and extract the value.
     for (size_t i = 0; i + 6 < len; i++) {
@@ -629,6 +637,12 @@ void connectMqtt() {
     mqttClient.subscribe(buildTopic(MQTT_UPDATE_SET_TOPIC).c_str());
     mqttClient.subscribe(MQTT_CERT_BROADCAST_TOPIC);
 
+    // Clear any stale retained factory-reset trigger before subscribing, so a message left
+    // over from a prior publish can never be redelivered on this (or any future) resubscribe.
+    String factoryResetTopic = buildTopic(MQTT_FACTORY_RESET_SET_TOPIC);
+    mqttClient.publish(factoryResetTopic.c_str(), "", true);
+    mqttClient.subscribe(factoryResetTopic.c_str());
+
     // Subscribe to tag topics; duplicate subscriptions are harmless under MQTT 3.1.1
     char tagTopic[64];
     for (int i = 0; i < cfg.ledCount; i++) {
@@ -677,6 +691,15 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
     if (t == buildTopic(MQTT_UPDATE_SET_TOPIC)) {
         if (p == "do-update") checkOta();
+        return;
+    }
+
+    if (t == buildTopic(MQTT_FACTORY_RESET_SET_TOPIC)) {
+        // Only honored within FACTORY_RESET_MQTT_WINDOW_MS of boot: requires the trigger to
+        // coincide with an actual power-cycle/reboot, not just MQTT broker access at will.
+        if (p == "do-factory-reset" && millis() < FACTORY_RESET_MQTT_WINDOW_MS) {
+            wipeProvisioningAndRestart();
+        }
         return;
     }
 
