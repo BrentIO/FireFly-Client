@@ -1066,7 +1066,7 @@ void publishAutoDiscovery() {
         doc["availability_topic"] = avail;
         doc["entity_category"]    = "diagnostic";
         doc["enabled_by_default"] = false;
-        doc["icon"]               = "mdi:restart-alert";
+        doc["icon"]               = "mdi:file-document-remove-outline";
         addDevice(doc);
         String payload;
         serializeJson(doc, payload);
