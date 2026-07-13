@@ -372,6 +372,7 @@ void runProvisioningMode() {
         rotateLeds();
 
         if (millis() - lastProvScan < PROVISIONING_SCAN_INTERVAL_MS) {
+            delay(10); // yield to the SDK so the software watchdog doesn't fire while we wait
             continue;
         }
         lastProvScan = millis();
