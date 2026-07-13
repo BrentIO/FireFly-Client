@@ -201,7 +201,18 @@ void setup() {
                        deviceIdentity.data.uuid, deviceIdentity.data.product_id,
                        (unsigned int)deviceIdentity.data.product_hex);
     } else {
+#ifdef ESP8266
+        // FFI0600-2011 is the only ESP8266 product ever produced, is discontinued, and
+        // predates this EEPROM-backed identity system entirely — deployed units will
+        // never have identity burned via HW-Reg. Treat missing identity as "not yet
+        // provisioned" rather than a fatal defect (handled after LittleFS mounts, below).
+        // Do NOT extend this leniency to future ESP32 products: those are always
+        // identity-burned via HW-Reg before deployment, so missing identity there is a
+        // genuine manufacturing/registration defect and must still halt.
+        Serial.println(F("Device identity: NOT SET (expected for legacy ESP8266 hardware) — treating as unprovisioned"));
+#else
         Serial.println(F("Device identity: NOT ENABLED (EEPROM missing/invalid, or product_hex mismatch) — halting"));
+#endif
     }
 
     for (int i = 0; i < LED_CHANNEL_COUNT; i++) {
@@ -209,9 +220,11 @@ void setup() {
         ledWrite(LED_PINS[i], 0);
     }
 
+#ifndef ESP8266
     if (!deviceIdentity.enabled) {
         haltWithFlashCode(3, 1);
     }
+#endif
 
     pinMode(FACTORY_RESET_PIN, INPUT_PULLUP);
 
@@ -233,6 +246,14 @@ void setup() {
     }
 
     Serial.println(F("LittleFS mounted"));
+
+#ifdef ESP8266
+    if (!deviceIdentity.enabled) {
+        Serial.println(F("No device identity — entering provisioning mode"));
+        runProvisioningMode();
+        return;
+    }
+#endif
 
     provisioned = loadConfig();
 
