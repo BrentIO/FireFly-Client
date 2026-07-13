@@ -152,6 +152,10 @@ unsigned long lastTelemetryAt   = 0;
 uint8_t       unProvRotateIndex = 0;
 unsigned long unProvRotateAt    = 0;
 
+// Debug: edge-triggered connection state logging (avoids spamming loop() every iteration)
+bool wifiConnectedLogged = false;
+bool mqttConnectedLogged = false;
+
 // ─── Forward declarations ─────────────────────────────────────────────────────
 
 void   haltWithFlashCode(uint8_t shortBursts, uint8_t longBursts);
@@ -177,25 +181,55 @@ void   tickTagAnimation(int idx);
 void   rotateLeds();
 void   checkOta();
 String buildTopic(const char* pattern);
+const char* mqttStateReason(int state);
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
 void setup() {
 
+    Serial.begin(115200);
+    Serial.println();
+    Serial.println(F("=========================================="));
+    Serial.printf("%s v%s (%s)\n", APPLICATION_NAME, VERSION, COMMIT_HASH);
+    Serial.printf("Reset reason: %s\n", ESP.getResetReason().c_str());
+    Serial.println(F("=========================================="));
+
     deviceIdentity.begin();
+
+    if (deviceIdentity.enabled) {
+        Serial.printf("Device identity: uuid=%s product_id=%s product_hex=0x%08X\n",
+                       deviceIdentity.data.uuid, deviceIdentity.data.product_id,
+                       (unsigned int)deviceIdentity.data.product_hex);
+    } else {
+#ifdef ESP8266
+        // FFI0600-2011 is the only ESP8266 product ever produced, is discontinued, and
+        // predates this EEPROM-backed identity system entirely — deployed units will
+        // never have identity burned via HW-Reg. Treat missing identity as "not yet
+        // provisioned" rather than a fatal defect (handled after LittleFS mounts, below).
+        // Do NOT extend this leniency to future ESP32 products: those are always
+        // identity-burned via HW-Reg before deployment, so missing identity there is a
+        // genuine manufacturing/registration defect and must still halt.
+        Serial.println(F("Device identity: NOT SET (expected for legacy ESP8266 hardware) — treating as unprovisioned"));
+#else
+        Serial.println(F("Device identity: NOT ENABLED (EEPROM missing/invalid, or product_hex mismatch) — halting"));
+#endif
+    }
 
     for (int i = 0; i < LED_CHANNEL_COUNT; i++) {
         pinMode(LED_PINS[i], OUTPUT);
         ledWrite(LED_PINS[i], 0);
     }
 
+#ifndef ESP8266
     if (!deviceIdentity.enabled) {
         haltWithFlashCode(3, 1);
     }
+#endif
 
     pinMode(FACTORY_RESET_PIN, INPUT_PULLUP);
 
     if (digitalRead(FACTORY_RESET_PIN) == LOW) {
+        Serial.println(F("Factory reset pin held LOW at boot — wiping provisioning and restarting"));
         wipeProvisioningAndRestart();
     }
 
@@ -204,20 +238,45 @@ void setup() {
         // Format and remount so saveConfig() can write during provisioning.
         // Only done here: the path below where begin() succeeds but config is absent
         // must never format — the filesystem is healthy in that case.
+        Serial.println(F("LittleFS mount failed — formatting and entering provisioning mode"));
         LittleFS.format();
         LittleFS.begin();
         runProvisioningMode();
         return;
     }
 
+    Serial.println(F("LittleFS mounted"));
+
+#ifdef ESP8266
+    if (!deviceIdentity.enabled) {
+        Serial.println(F("No device identity — entering provisioning mode"));
+        runProvisioningMode();
+        return;
+    }
+#endif
+
     provisioned = loadConfig();
 
     if (!provisioned) {
+        Serial.println(F("No valid config found on flash — entering provisioning mode"));
         runProvisioningMode();
         return;
     }
 
-    loadCert();
+    Serial.println(F("Config loaded:"));
+    Serial.printf("  id=%s name=%s area=%s\n", cfg.id.c_str(), cfg.name.c_str(), cfg.area.c_str());
+    Serial.printf("  wifi ssid=%s\n", cfg.wifiSsid.c_str());
+    Serial.printf("  mqtt host=%s port=%d username=%s\n", cfg.mqttHost.c_str(), cfg.mqttPort, cfg.mqttUsername.c_str());
+    Serial.printf("  led channels configured=%d\n", cfg.ledCount);
+
+    bool certLoaded = loadCert();
+    if (certLoaded) {
+        Serial.printf("Certificate loaded: fingerprint=%s cn=%s expires=%s\n",
+                       certFingerprint.c_str(), certCommonName.c_str(), certExpiration.c_str());
+    } else {
+        Serial.println(F("No client certificate on flash — MQTT/HTTPS will connect without a TLS trust anchor"));
+    }
+
     connectWifi();
 
     mqttClient.setServer(cfg.mqttHost.c_str(), cfg.mqttPort);
@@ -234,17 +293,37 @@ void loop() {
     }
 
     if (WiFi.status() != WL_CONNECTED) {
+        if (wifiConnectedLogged) {
+            Serial.printf("WiFi connection lost (status=%d)\n", WiFi.status());
+            wifiConnectedLogged = false;
+            mqttConnectedLogged = false;
+        }
         if (millis() - lastWifiAttempt >= WIFI_RECONNECT_INTERVAL_MS) {
             connectWifi();
         }
         return;
     }
 
+    if (!wifiConnectedLogged) {
+        Serial.printf("WiFi connected: ssid=%s ip=%s rssi=%ddBm\n",
+                       cfg.wifiSsid.c_str(), WiFi.localIP().toString().c_str(), WiFi.RSSI());
+        wifiConnectedLogged = true;
+    }
+
     if (!mqttClient.connected()) {
+        if (mqttConnectedLogged) {
+            Serial.printf("MQTT connection lost: state=%d (%s)\n", mqttClient.state(), mqttStateReason(mqttClient.state()));
+            mqttConnectedLogged = false;
+        }
         if (millis() - lastMqttAttempt >= MQTT_RECONNECT_WAIT_MILLISECONDS) {
             connectMqtt();
         }
         return;
+    }
+
+    if (!mqttConnectedLogged) {
+        Serial.println(F("MQTT connected and subscriptions established"));
+        mqttConnectedLogged = true;
     }
 
     mqttClient.loop();
@@ -286,18 +365,29 @@ void runProvisioningMode() {
     // Password is derived from the Controller's BSSID via nibble-interleave algorithm.
     // Flow: POST /api/provisioning/token → GET /api/clients/{uuid} → GET /api/provisioning/certs/client
 
+    Serial.println(F("Entering provisioning mode — scanning for FireFly-Provisioning SoftAP"));
+
     while (true) {
 
         rotateLeds();
 
         if (millis() - lastProvScan < PROVISIONING_SCAN_INTERVAL_MS) {
+            delay(10); // yield to the SDK so the software watchdog doesn't fire while we wait
             continue;
         }
         lastProvScan = millis();
 
         int nets = WiFi.scanNetworks();
+        Serial.printf("Scan complete: %d network(s) found\n", nets);
+
+        bool sawTarget = false;
+
         for (int n = 0; n < nets; n++) {
             if (WiFi.SSID(n) != "FireFly-Provisioning") continue;
+            sawTarget = true;
+
+            Serial.printf("Found FireFly-Provisioning SoftAP: bssid=%s rssi=%ddBm\n",
+                           WiFi.BSSIDstr(n).c_str(), WiFi.RSSI(n));
 
             uint8_t bssid[6];
             memcpy(bssid, WiFi.BSSID(n), 6);
@@ -308,6 +398,7 @@ void runProvisioningMode() {
                 snprintf(&password[i * 2], 3, "%X%X", upper, lower);
             }
 
+            Serial.println(F("Connecting to SoftAP..."));
             WiFi.begin("FireFly-Provisioning", (const char*)password);
             unsigned long start = millis();
             while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
@@ -315,7 +406,12 @@ void runProvisioningMode() {
                 delay(50);
             }
 
-            if (WiFi.status() != WL_CONNECTED) break;
+            if (WiFi.status() != WL_CONNECTED) {
+                Serial.printf("Failed to connect to SoftAP (status=%d) — will retry next scan\n", WiFi.status());
+                break;
+            }
+
+            Serial.printf("Connected to SoftAP, ip=%s\n", WiFi.localIP().toString().c_str());
 
             WiFiClient client;
             HTTPClient  http;
@@ -330,36 +426,54 @@ void runProvisioningMode() {
             String tokenReqBody;
             serializeJson(tokenReqDoc, tokenReqBody);
 
+            Serial.println(F("Step 1/3: POST /api/provisioning/token"));
             http.begin(client, "http://192.168.4.1/api/provisioning/token");
             http.addHeader("Content-Type", "application/json");
             int code = http.POST(tokenReqBody);
-            if (code != 200) { http.end(); break; }
+            Serial.printf("  response code=%d\n", code);
+            if (code != 200) { Serial.println(F("  token request failed")); http.end(); break; }
 
             String tokenPayload = http.getString();
             http.end();
 
             JsonDocument tokenDoc;
-            if (deserializeJson(tokenDoc, tokenPayload) != DeserializationError::Ok) break;
-            if (tokenDoc["token"].isNull()) break;
+            DeserializationError tokenErr = deserializeJson(tokenDoc, tokenPayload);
+            if (tokenErr != DeserializationError::Ok) {
+                Serial.printf("  failed to parse token response: %s\n", tokenErr.c_str());
+                break;
+            }
+            if (tokenDoc["token"].isNull()) {
+                Serial.println(F("  token response missing 'token' field"));
+                break;
+            }
 
             uint32_t provToken = tokenDoc["token"].as<uint32_t>();
             char provTokenStr[12];
             snprintf(provTokenStr, sizeof(provTokenStr), "%lu", (unsigned long)provToken);
+            Serial.println(F("  token received"));
 
             // Step 2: fetch this client's configuration record
+            Serial.println(F("Step 2/3: GET /api/clients/{uuid}"));
             http.begin(client, "http://192.168.4.1/api/clients/" + String(deviceIdentity.data.uuid));
             http.addHeader("provisioning-token", provTokenStr);
             code = http.GET();
-            if (code != 200) { http.end(); break; }
+            Serial.printf("  response code=%d\n", code);
+            if (code != 200) { Serial.println(F("  client config request failed")); http.end(); break; }
             String configJson = http.getString();
             http.end();
 
-            if (!saveConfig(configJson)) break;
+            if (!saveConfig(configJson)) {
+                Serial.println(F("  failed to save config to LittleFS"));
+                break;
+            }
+            Serial.printf("  config saved (%u bytes)\n", (unsigned int)configJson.length());
 
             // Step 3: fetch the client CA certificate (404 = none designated; continue without)
+            Serial.println(F("Step 3/3: GET /api/provisioning/certs/client"));
             http.begin(client, "http://192.168.4.1/api/provisioning/certs/client");
             http.addHeader("provisioning-token", provTokenStr);
             code = http.GET();
+            Serial.printf("  response code=%d\n", code);
             if (code == 200) {
                 String certJson = http.getString();
                 JsonDocument certDoc;
@@ -371,14 +485,26 @@ void runProvisioningMode() {
                         if (f) { f.print(pem); f.close(); }
                         File ff = LittleFS.open(CERT_FP_FILE, "w");
                         if (ff) { ff.print(fp); ff.close(); }
+                        Serial.println(F("  certificate saved"));
                     }
+                } else {
+                    Serial.println(F("  failed to parse certificate response"));
                 }
+            } else if (code == 404) {
+                Serial.println(F("  no certificate designated for this client — continuing without a TLS trust anchor"));
+            } else {
+                Serial.println(F("  certificate request failed"));
             }
             http.end();
 
+            Serial.println(F("Provisioning complete — restarting"));
             WiFi.disconnect();
             delay(500);
             ESP.restart();
+        }
+
+        if (!sawTarget) {
+            Serial.println(F("FireFly-Provisioning SoftAP not found in this scan"));
         }
     }
 }
@@ -472,6 +598,7 @@ bool saveConfig(const String& json) {
 // Deletes all provisioning state and reboots into runProvisioningMode(). Shared by the
 // boot-time FACTORY_RESET_PIN check and the MQTT-triggered remote factory reset.
 void wipeProvisioningAndRestart() {
+    Serial.println(F("Wiping provisioning state (config, cert) and restarting"));
     LittleFS.begin();
     LittleFS.remove(CONFIG_FILE);
     LittleFS.remove(CERT_FILE);
@@ -600,6 +727,7 @@ bool loadCert() {
 
 void connectWifi() {
     lastWifiAttempt = millis();
+    Serial.printf("Connecting to WiFi SSID '%s'...\n", cfg.wifiSsid.c_str());
     WiFi.mode(WIFI_STA);
     WiFi.begin(cfg.wifiSsid.c_str(), cfg.wifiPassword.c_str());
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
@@ -611,6 +739,9 @@ void connectMqtt() {
 
     lastMqttAttempt = millis();
 
+    Serial.printf("Connecting to MQTT broker %s:%d as client '%s'...\n",
+                   cfg.mqttHost.c_str(), cfg.mqttPort, deviceIdentity.data.uuid);
+
     String availTopic = buildTopic(MQTT_AVAILABILITY_TOPIC);
     bool connected = mqttClient.connect(
         deviceIdentity.data.uuid,
@@ -619,7 +750,12 @@ void connectMqtt() {
         availTopic.c_str(), 0, true, "offline"
     );
 
-    if (!connected) return;
+    if (!connected) {
+        Serial.printf("MQTT connect failed: state=%d (%s)\n", mqttClient.state(), mqttStateReason(mqttClient.state()));
+        return;
+    }
+
+    Serial.println(F("MQTT connected — publishing availability and subscribing"));
 
     mqttClient.publish(availTopic.c_str(), "online", true);
 
@@ -630,6 +766,7 @@ void connectMqtt() {
         snprintf(topic, sizeof(topic), MQTT_INPUT_STATE_TOPIC,
                  cfg.leds[i].portId.c_str(), cfg.leds[i].channelNumber);
         mqttClient.subscribe(topic);
+        Serial.printf("  subscribed: %s\n", topic);
     }
 
     mqttClient.subscribe(buildTopic(MQTT_LED_BRIGHTNESS_TOPIC).c_str());
@@ -652,6 +789,8 @@ void connectMqtt() {
         }
     }
 
+    Serial.println(F("Subscriptions established"));
+
     publishTelemetry();
     publishAutoDiscovery();
 
@@ -670,6 +809,8 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     p.reserve(length);
     for (unsigned int i = 0; i < length; i++) p += (char)payload[i];
     p.trim();
+
+    Serial.printf("MQTT rx: %s (%u bytes)\n", topic, length);
 
     // Input state: FireFly/inputs/{portId}/channels/{channelNumber}/state
     if (t.startsWith("FireFly/inputs/") && t.endsWith("/state")) {
@@ -945,6 +1086,22 @@ String buildTopic(const char* pattern) {
     char buf[128];
     snprintf(buf, sizeof(buf), pattern, deviceIdentity.data.uuid);
     return String(buf);
+}
+
+const char* mqttStateReason(int state) {
+    switch (state) {
+        case -4: return "MQTT_CONNECTION_TIMEOUT";
+        case -3: return "MQTT_CONNECTION_LOST";
+        case -2: return "MQTT_CONNECT_FAILED (broker unreachable)";
+        case -1: return "MQTT_DISCONNECTED";
+        case  0: return "MQTT_CONNECTED";
+        case  1: return "MQTT_CONNECT_BAD_PROTOCOL";
+        case  2: return "MQTT_CONNECT_BAD_CLIENT_ID";
+        case  3: return "MQTT_CONNECT_UNAVAILABLE (server unavailable)";
+        case  4: return "MQTT_CONNECT_BAD_CREDENTIALS";
+        case  5: return "MQTT_CONNECT_UNAUTHORIZED";
+        default: return "UNKNOWN";
+    }
 }
 
 // ─── Telemetry ───────────────────────────────────────────────────────────────
