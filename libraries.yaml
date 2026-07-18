@@ -1,23 +1,30 @@
 # Arduino cores and libraries used by FireFly Client firmware.
 # This is the single source of truth for core/library names, versions, and URLs.
+# `sha` is the full commit SHA the pinned `version` tag points to, used for the actual
+# git-ref install so a moved/re-pointed tag can't silently change what gets built.
 # Changes here are automatically propagated to FireFly-Docs on production builds.
 # URL must not include a .git suffix.
 
 cores:
   - name: "esp8266:esp8266"
     version: "3.1.2"
+    sha: "210897ef83305496947c4e73c937bab52a33cb48"
     url: "https://github.com/esp8266/Arduino"
 
 libraries:
   - name: "ArduinoJson"
     version: "v7.4.3"
+    sha: "77771d3c07668e01d8f52acb03910c1110bb373f"
     url: "https://github.com/bblanchon/ArduinoJson"
   - name: "TBPubSubClient"
     version: "v2.12.1"
+    sha: "c56ad338d1a88be71a5d6d3effb722e5b5bd6108"
     url: "https://github.com/thingsboard/pubsubclient"
   - name: "ESPAsyncTCP"
     version: "v2.0.0"
+    sha: "6aa552d9910515be08af4bda70a29714ddca3025"
     url: "https://github.com/ESP32Async/ESPAsyncTCP"
   - name: "ESPAsyncWebServer"
     version: "v3.11.2"
+    sha: "89954654a02e5acaebee3cd3fb7fc9d2a46ac834"
     url: "https://github.com/ESP32Async/ESPAsyncWebServer"

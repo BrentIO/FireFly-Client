@@ -130,7 +130,7 @@ jobs:
       - name: Install Required Libraries at Specified Revisions
         if: ${{ !env.ACT && steps.cache-arduino-libs.outputs.cache-hit != 'true' }}
         run: |
-          yq -r '.libraries[] | .url + ".git#" + .version' ${{ github.workspace }}/libraries.yaml | \
+          yq -r '.libraries[] | .url + ".git#" + (.sha // .version)' ${{ github.workspace }}/libraries.yaml | \
             xargs -I{} arduino-cli lib install --git-url {}
 
       - name: Create Output Directory
