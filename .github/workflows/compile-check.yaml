@@ -56,7 +56,7 @@ jobs:
 
       - name: Install libraries
         run: |
-          yq -r '.libraries[] | .url + ".git#" + .version' libraries.yaml | \
+          yq -r '.libraries[] | .url + ".git#" + (.sha // .version)' libraries.yaml | \
             xargs -I{} arduino-cli lib install --git-url {}
 
       - name: Compile Client
