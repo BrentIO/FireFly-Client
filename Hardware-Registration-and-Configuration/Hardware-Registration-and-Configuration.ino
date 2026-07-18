@@ -13,6 +13,7 @@
 #include <ArduinoJson.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
+#include <ESP8266httpUpdate.h>
 #include <WiFiClientSecure.h>
 #include <ESPAsyncWebServer.h>
 #include <time.h>
@@ -390,6 +391,72 @@ static void handlePostNetworkWifi(AsyncWebServerRequest* req, JsonVariant& body)
     req->send(200, "application/json", out);
 }
 
+// Flashes production firmware and hands off from HW-Reg. Body mirrors FireFly-Controller's
+// POST /api/ota shape; only binaries[0].url drives the flash, other fields are unused here.
+// https:// URLs are verified against the baked FIREFLY_CLOUD_CERT_PEM trust anchor — if that
+// cert isn't available in this build, the request fails rather than falling back to an
+// unverified connection. http:// URLs (the expected case: a technician's laptop serving the
+// binary locally via scripts/serve_firmware.py) connect with a plain WiFiClient, nothing to
+// verify. On success, ESPhttpUpdate calls ESP.restart() internally and this never returns.
+static void handlePostFirmwareUpdate(AsyncWebServerRequest* req, JsonVariant& body) {
+    if (!deviceIdentity.enabled) {
+        req->send(409, "application/json", "{\"error\":\"not provisioned\"}");
+        return;
+    }
+    if (WiFi.status() != WL_CONNECTED) {
+        req->send(503, "application/json", "{\"error\":\"no internet — POST /api/network/wifi first\"}");
+        return;
+    }
+    if (!body.is<JsonObject>()) {
+        req->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
+        return;
+    }
+    JsonObject obj      = body.as<JsonObject>();
+    JsonArray  binaries = obj["binaries"].as<JsonArray>();
+    String     url      = (binaries.size() > 0) ? (const char*)(binaries[0]["url"] | "") : "";
+
+    if (url.length() == 0) {
+        req->send(400, "application/json", "{\"error\":\"binaries[0].url is required\"}");
+        return;
+    }
+
+    addEvent("Firmware update requested");
+
+    t_httpUpdate_return result;
+
+    if (url.startsWith("https://")) {
+#ifdef FIREFLY_CLOUD_CERT_PEM
+        WiFiClientSecure updateClient;
+        static BearSSL::X509List updateCA(FIREFLY_CLOUD_CERT_PEM);
+        updateClient.setTrustAnchors(&updateCA);
+        result = ESPhttpUpdate.update(updateClient, url);
+#else
+        addError("https firmware url but no baked cloud cert — refusing");
+        req->send(500, "application/json",
+                  "{\"error\":\"https url requires a baked cloud cert, unavailable in this build\"}");
+        return;
+#endif
+    } else if (url.startsWith("http://")) {
+        WiFiClient updateClient;
+        result = ESPhttpUpdate.update(updateClient, url);
+    } else {
+        req->send(400, "application/json", "{\"error\":\"url must be http:// or https://\"}");
+        return;
+    }
+
+    // HTTP_UPDATE_OK reboots internally and never reaches here. A failed transfer/flash
+    // leaves the original running image intact (eboot semantics), so this stays retryable.
+    if (result == HTTP_UPDATE_FAILED) {
+        addError("Firmware update failed");
+        JsonDocument errDoc;
+        errDoc["error"]     = "firmware update failed";
+        errDoc["ota_error"] = ESPhttpUpdate.getLastErrorString();
+        String errOut;
+        serializeJson(errDoc, errOut);
+        req->send(502, "application/json", errOut);
+    }
+}
+
 static void handleGetNetwork(AsyncWebServerRequest* req) {
     JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
@@ -520,6 +587,7 @@ void setup() {
     httpServer.on("/api/registration", HTTP_GET,  handleGetRegistration);
     httpServer.on("/api/registration", HTTP_POST, handlePostRegistration);
     httpServer.on("/api/network/wifi", HTTP_POST, handlePostNetworkWifi);
+    httpServer.on("/api/firmware/update", HTTP_POST, handlePostFirmwareUpdate);
     httpServer.on("/api/network",      HTTP_GET,  handleGetNetwork);
     httpServer.on("/api/version",      HTTP_GET,  handleGetVersion);
     httpServer.on("/api/mcu",          HTTP_GET,  handleGetMcu);
