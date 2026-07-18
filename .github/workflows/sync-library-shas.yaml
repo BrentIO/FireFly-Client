@@ -1,0 +1,78 @@
+name: 🔗 Sync Library SHA Pins
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - libraries.yaml
+
+concurrency:
+  group: sync-library-shas-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  sync:
+    name: Sync sha pins to match version
+    runs-on: ubuntu-24.04
+
+    # Only same-repo PRs get a GITHUB_TOKEN with write access; fork PRs would
+    # fail to push back, so skip them rather than fail the check.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Resolve version tags to commit SHAs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          sync_section() {
+            local section="$1" count
+            count=$(yq -r ".${section} | length" libraries.yaml)
+
+            for i in $(seq 0 $((count - 1))); do
+              name=$(yq -r ".${section}[$i].name" libraries.yaml)
+              version=$(yq -r ".${section}[$i].version" libraries.yaml)
+              url=$(yq -r ".${section}[$i].url" libraries.yaml)
+              repo="${url#https://github.com/}"
+              current_sha=$(yq -r ".${section}[$i].sha // \"\"" libraries.yaml)
+
+              resolved_sha=$(curl -s \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${repo}/commits/${version}" | jq -r '.sha // empty')
+
+              if [ -z "$resolved_sha" ]; then
+                echo "::warning::Could not resolve ${name} (${repo}@${version}) to a commit SHA, leaving as-is"
+                continue
+              fi
+
+              if [ "$resolved_sha" != "$current_sha" ]; then
+                echo "Updating ${name}: sha ${current_sha:-<none>} -> ${resolved_sha}"
+                yq -i ".${section}[$i].sha = \"${resolved_sha}\"" libraries.yaml
+              fi
+            done
+          }
+
+          sync_section "cores"
+          sync_section "libraries"
+
+      - name: Commit sha updates
+        uses: stefanzweifel/git-auto-commit-action@4a55954c782fc1ea30b9056cd3e7a2b40ca8887d # v7.2.0
+        with:
+          commit_message: "chore: sync libraries.yaml sha pins to match version"
+          file_pattern: libraries.yaml
+          commit_user_name: github-actions[bot]
+          commit_user_email: 41898282+github-actions[bot]@users.noreply.github.com
