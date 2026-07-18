@@ -16,6 +16,8 @@ tags:
     description: Operations for managing device registration with FireFly-Cloud
   - name: Network
     description: Operations for network interfaces and WiFi uplink
+  - name: Firmware
+    description: Operations for flashing production firmware and handing off from HW-Reg
   - name: Peripherals
     description: Operations for the on-board peripherals
   - name: MCU
@@ -241,6 +243,73 @@ paths:
               example:
                 error: connection failed
 
+  /api/firmware/update:
+    post:
+      tags:
+        - Firmware
+      summary: Flash production firmware and hand off from HW-Reg
+      description: >
+        Flashes the binary at binaries[0].url via ESPhttpUpdate and hands off from HW-Reg
+        to production Client firmware. Requires device identity to already be provisioned
+        (POST /api/identity first) and an active WiFi connection (POST /api/network/wifi
+        first). https:// URLs are verified against the cloud CA baked into this build at
+        compile time; if that cert isn't available, the request fails rather than
+        connecting unverified. http:// URLs — the expected case, a technician's laptop
+        serving the binary locally via scripts/serve_firmware.py — connect without TLS.
+        On success, the device flashes and reboots into the new firmware; the caller sees
+        the connection drop rather than a response. On failure the original firmware is
+        left intact and the endpoint remains retryable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/firmwareUpdateRequest'
+      responses:
+        '400':
+          description: Bad Request — binaries[0].url missing, or url is not http(s)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error_message'
+              examples:
+                missingUrl:
+                  value: {error: 'binaries[0].url is required'}
+                badScheme:
+                  value: {error: 'url must be http:// or https://'}
+        '409':
+          description: Conflict — device identity not provisioned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error_message'
+              example:
+                error: not provisioned
+        '500':
+          description: Internal Server Error — https url given but no cloud cert baked into this build
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error_message'
+              example:
+                error: https url requires a baked cloud cert, unavailable in this build
+        '502':
+          description: Bad Gateway — firmware fetch or flash failed; original firmware still running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error_message'
+              example:
+                error: firmware update failed
+        '503':
+          description: Service Unavailable — no internet connection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error_message'
+              example:
+                error: no internet — POST /api/network/wifi first
+
   /api/network:
     get:
       tags:
@@ -443,6 +512,43 @@ components:
           type: string
           description: WiFi network password
           example: s3cr3t
+
+    firmwareBinary:
+      type: object
+      required:
+        - url
+      properties:
+        url:
+          type: string
+          description: >
+            Location to fetch the firmware binary from. http:// for a local
+            scripts/serve_firmware.py instance (the expected case); https:// is verified
+            against this build's baked cloud CA.
+          example: http://192.168.4.2:8080/Client.ino.bin
+
+    firmwareUpdateRequest:
+      type: object
+      required:
+        - binaries
+      properties:
+        application_name:
+          type: string
+          description: Accepted and logged; not required non-empty and does not affect the flash
+          example: Client
+        version:
+          type: string
+          description: Accepted and logged; not required non-empty and does not affect the flash
+          example: 2026.07.01
+        release_url:
+          type: string
+          description: Accepted and logged; not required non-empty and does not affect the flash
+          example: https://github.com/BrentIO/FireFly-Client/releases/tag/2026.07.01
+        binaries:
+          type: array
+          minItems: 1
+          description: Only binaries[0].url is used — ESP8266 only ever has one combined binary
+          items:
+            $ref: '#/components/schemas/firmwareBinary'
 
     networkInterfaceType:
       type: string
