@@ -38,7 +38,7 @@ jobs:
           echo "FQBN=$FQBN" >> $GITHUB_ENV
 
       - name: Install Arduino CLI
-        uses: arduino/setup-arduino-cli@81d310742121c928ea9c8bbd407b4217b432ae02 # v2
+        uses: arduino/setup-arduino-cli@b3cda96fddef6af6c56b4c5efb5c47e2357935db # v2
         with:
           version: 1.4.1
 
